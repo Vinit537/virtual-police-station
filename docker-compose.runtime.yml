@@ -1,0 +1,20 @@
+services:
+  mysql-runtime:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: vps_runtime
+      MYSQL_USER: vps_user
+      MYSQL_PASSWORD: vps_pass
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-runtime-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql-runtime-data:

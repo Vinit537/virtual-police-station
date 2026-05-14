@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/vpsdb;MODE=MySQL;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  h2:
+    console:
+      enabled: true
+
+server:
+  port: 8080
+
+app:
+  jwt:
+    secret: 0C5R8bQ80f9UxyJ5LJ3y1odidGsB7NvX4yDke8j5w8eN0dG4JqIu6tVYQdN5A9zJ
+    expiration-ms: 86400000
+  otp:
+    ttl-seconds: 300
+  ocr:
+    tesseract-command: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+    max-file-size-kb: 5120

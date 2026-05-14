@@ -1,0 +1,44 @@
+# Ignore Maven/Gradle build output
+target/
+**/target/
+
+# Ignore backend build artifacts
+backend/target/
+
+# Node
+node_modules/
+frontend/node_modules/
+dist/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.iml
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Runtime data
+backend/data/
+data/
+*.db
+*.db.mv.db
+*.db.trace.db
+
+# Local dependency caches/tooling
+.m2/
+.tools/
+
+# Playwright outputs
+frontend/playwright-report/
+frontend/test-results/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Java compiled classes and jars in build output
+*.class
+*.jar
+*.war

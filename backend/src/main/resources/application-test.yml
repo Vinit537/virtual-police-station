@@ -1,0 +1,31 @@
+spring:
+  datasource:
+    url: ${TEST_DB_URL:jdbc:mysql://localhost:3306/vps_test?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${TEST_DB_USER:vps_test}
+    password: ${TEST_DB_PASSWORD:vps_test}
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  sql:
+    init:
+      mode: never
+
+app:
+  jwt:
+    secret: 0C5R8bQ80f9UxyJ5LJ3y1odidGsB7NvX4yDke8j5w8eN0dG4JqIu6tVYQdN5A9zJ
+    expiration-ms: 86400000
+  otp:
+    ttl-seconds: 300
+  ocr:
+    tesseract-command: tesseract
+    max-file-size-kb: 5120

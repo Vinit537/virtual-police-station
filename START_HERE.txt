@@ -1,0 +1,16 @@
+Virtual Police Station - Instant Start (Windows)
+
+1) Open PowerShell in this folder.
+2) Run:
+   powershell -ExecutionPolicy Bypass -File .\scripts\start-instant.ps1
+
+The script will:
+- Install Node.js, Java 21, Maven, and Playwright browsers if missing
+- Start MySQL in Docker
+- Launch backend on http://localhost:8080
+- Launch frontend on http://localhost:5173
+
+If Docker Desktop is not installed, install it and rerun.
+
+To package the project zip:
+  powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
