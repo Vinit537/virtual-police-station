@@ -6,16 +6,16 @@ import { Icon } from './icons'
 
 const ROLE_NAV = {
   CITIZEN: [
-    { to: '/citizen', labelKey: 'nav_dashboard', icon: 'shield' },
-    { to: '/citizen', labelKey: 'nav_services', icon: 'info' },
+    { to: '/citizen?tab=home', labelKey: 'nav_dashboard', icon: 'shield' },
+    { to: '/citizen?tab=file', labelKey: 'nav_services', icon: 'info' },
   ],
   POLICE: [
-    { to: '/police', labelKey: 'nav_dashboard', icon: 'shield' },
-    { to: '/police', labelKey: 'nav_case_desk', icon: 'warning' },
+    { to: '/police?tab=dashboard', labelKey: 'nav_dashboard', icon: 'shield' },
+    { to: '/police?tab=case-desk', labelKey: 'nav_case_desk', icon: 'warning' },
   ],
   ADMIN: [
-    { to: '/admin', labelKey: 'nav_dashboard', icon: 'shield' },
-    { to: '/admin', labelKey: 'nav_control_room', icon: 'info' },
+    { to: '/admin?tab=dashboard', labelKey: 'nav_dashboard', icon: 'shield' },
+    { to: '/admin?tab=control-room', labelKey: 'nav_control_room', icon: 'info' },
   ],
 }
 
@@ -90,6 +90,12 @@ function Sidebar({ user, location }) {
   const links = ROLE_NAV[user.role] ?? []
   const roleBadge = ROLE_BADGE[user.role] ?? { labelKey: null, cls: 'bg-slate-100 text-slate-600' }
   const { t } = useTranslation()
+  const isLinkActive = (to) => {
+    const [path, query = ''] = to.split('?')
+    if (location.pathname !== path) return false
+    if (!query) return true
+    return location.search.replace(/^\?/, '') === query
+  }
   return (
     <aside className="sticky top-20 h-fit animate-slide-in rounded-2xl border border-policeBlue-50 bg-white p-4 shadow-panel">
       <div className="mb-4 flex items-center gap-3 rounded-xl bg-policeBlue-50 p-3">
@@ -103,7 +109,7 @@ function Sidebar({ user, location }) {
       <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">{t('sidebar_navigation')}</p>
       <nav className="space-y-1" aria-label="Primary">
         {links.map((link) => (
-          <Link key={link.to + link.labelKey} to={link.to} className={`nav-link ${location.pathname === link.to ? 'active' : ''}`}>
+          <Link key={link.to + link.labelKey} to={link.to} className={`nav-link ${isLinkActive(link.to) ? 'active' : ''}`}>
             <span aria-hidden><Icon name={link.icon} size={16} /></span>
             <span>{t(link.labelKey)}</span>
           </Link>

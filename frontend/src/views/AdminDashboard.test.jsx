@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { LanguageProvider } from '../i18n/LanguageContext'
 import { AdminDashboard } from './AdminDashboard'
 
@@ -96,9 +97,11 @@ describe('AdminDashboard V2 command centre', () => {
     })
 
     render(
-      <LanguageProvider>
-        <AdminDashboard />
-      </LanguageProvider>,
+      <MemoryRouter initialEntries={['/admin?tab=control-room']}>
+        <LanguageProvider>
+          <AdminDashboard />
+        </LanguageProvider>
+      </MemoryRouter>,
     )
 
     await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/admin/command/queue', expect.objectContaining({
@@ -121,9 +124,11 @@ describe('AdminDashboard V2 command centre', () => {
     mockPost.mockResolvedValue({ data: buildDetail(2) })
 
     render(
-      <LanguageProvider>
-        <AdminDashboard />
-      </LanguageProvider>,
+      <MemoryRouter initialEntries={['/admin?tab=control-room']}>
+        <LanguageProvider>
+          <AdminDashboard />
+        </LanguageProvider>
+      </MemoryRouter>,
     )
 
     await screen.findByText('Admin Workbench #2')

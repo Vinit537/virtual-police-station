@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { LanguageProvider } from '../i18n/LanguageContext'
 import { PoliceDashboard } from './PoliceDashboard'
 
@@ -70,9 +71,11 @@ describe('PoliceDashboard V3', () => {
     })
 
     render(
-      <LanguageProvider>
-        <PoliceDashboard />
-      </LanguageProvider>,
+      <MemoryRouter initialEntries={['/police?tab=case-desk']}>
+        <LanguageProvider>
+          <PoliceDashboard />
+        </LanguageProvider>
+      </MemoryRouter>,
     )
 
     await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/police/fir/queue', { params: {} }))
@@ -123,9 +126,11 @@ describe('PoliceDashboard V3', () => {
     mockPost.mockResolvedValue({ data: {} })
 
     render(
-      <LanguageProvider>
-        <PoliceDashboard />
-      </LanguageProvider>,
+      <MemoryRouter initialEntries={['/police?tab=case-desk']}>
+        <LanguageProvider>
+          <PoliceDashboard />
+        </LanguageProvider>
+      </MemoryRouter>,
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'All Open' }))

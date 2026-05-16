@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { http } from '../api/http'
 import { extractApiError, useFirs } from '../api/hooks'
@@ -10,43 +10,106 @@ import { PageTemplate } from '../ui/DesignSystem'
 const SpeechRecognition = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
 const MAX_FILE_BYTES = 25 * 1024 * 1024
 const ACCEPTED_EVIDENCE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'pdf', 'txt', 'doc', 'docx', 'rtf', 'odt']
+const INDIAN_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
+  'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur',
+  'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana',
+  'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Andaman and Nicobar Islands', 'Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+]
 
 function useVoiceInput() {
   const [listening, setListening] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [error, setError] = useState('')
+  const [permissionGranted, setPermissionGranted] = useState(false)
   const recognitionRef = useRef(null)
+  const shouldContinueRef = useRef(false)
 
-  const start = () => {
+  const start = async () => {
+    if (listening) return
+    setError('')
     if (!SpeechRecognition) {
       setError('Speech recognition is not supported in this browser.')
       return
     }
-    const recognition = new SpeechRecognition()
+    if (typeof window !== 'undefined' && window.isSecureContext === false) {
+      setError('Voice recording requires a secure context (HTTPS or localhost).')
+      return
+    }
+    try {
+      // Explicitly request mic access so users reliably get a permission prompt.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach((track) => track.stop())
+      setPermissionGranted(true)
+    } catch {
+      setPermissionGranted(false)
+      setError('Microphone permission denied. Allow microphone access and try again.')
+      return
+    }
+
+    const RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition
+    const recognition = new RecognitionCtor()
     recognition.continuous = true
     recognition.interimResults = true
+    recognition.maxAlternatives = 1
     recognition.lang = 'en-IN'
-    recognition.onstart = () => setListening(true)
-    recognition.onend = () => setListening(false)
-    recognition.onerror = (event) => setError(`Voice error: ${event.error}`)
-    recognition.onresult = (event) => {
-      let next = ''
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        next += `${event.results[index][0].transcript} `
+    recognition.onstart = () => {
+      shouldContinueRef.current = true
+      setListening(true)
+    }
+    recognition.onend = () => {
+      if (shouldContinueRef.current) {
+        try {
+          recognition.start()
+          return
+        } catch {
+          // Ignore restart race and fall through to stopped state.
+        }
       }
-      setTranscript((prev) => `${prev}${next}`)
+      setListening(false)
+    }
+    recognition.onerror = (event) => {
+      const code = event?.error || 'unknown'
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        setError('Microphone access blocked by browser settings. Enable it for localhost and retry.')
+      } else if (code === 'no-speech') {
+        setError('No speech detected. Speak clearly and keep the mic close.')
+      } else {
+        setError(`Voice error: ${code}`)
+      }
+    }
+    recognition.onresult = (event) => {
+      let finalText = ''
+      let interimText = ''
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const segment = `${event.results[index][0].transcript} `
+        if (event.results[index].isFinal) finalText += segment
+        else interimText += segment
+      }
+      setTranscript((prev) => `${prev} ${finalText}${interimText}`.trim())
     }
     recognitionRef.current = recognition
-    recognition.start()
+    try {
+      recognition.start()
+    } catch (err) {
+      setListening(false)
+      setError(err?.message || 'Unable to start voice recording.')
+    }
   }
 
-  const stop = () => recognitionRef.current?.stop()
+  const stop = () => {
+    shouldContinueRef.current = false
+    recognitionRef.current?.stop()
+    recognitionRef.current?.abort()
+    setListening(false)
+  }
   const clear = () => {
     setTranscript('')
     setError('')
   }
 
-  return { listening, transcript, error, supported: !!SpeechRecognition, start, stop, clear }
+  return { listening, transcript, error, supported: !!SpeechRecognition, permissionGranted, start, stop, clear }
 }
 
 function validateEvidenceFile(file) {
@@ -59,27 +122,7 @@ function validateEvidenceFile(file) {
   return null
 }
 
-function AccessibilityControls() {
-  const [largeText, setLargeText] = useState(false)
-  const [highContrast, setHighContrast] = useState(false)
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-policeBlue-100 bg-white p-3">
-      <span className="text-xs font-semibold uppercase tracking-wider text-policeBlue-500">Accessibility</span>
-      <button type="button" className={`btn btn-xs ${largeText ? 'btn-primary' : 'btn-outline'}`} onClick={() => setLargeText((v) => !v)}>
-        {largeText ? 'Normal Text' : 'Large Text'}
-      </button>
-      <button type="button" className={`btn btn-xs ${highContrast ? 'btn-primary' : 'btn-outline'}`} onClick={() => setHighContrast((v) => !v)}>
-        {highContrast ? 'Normal Contrast' : 'High Contrast'}
-      </button>
-      <div className={`w-full rounded-lg px-3 py-2 text-xs ${highContrast ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-600'} ${largeText ? 'text-sm' : ''}`}>
-        Keyboard shortcuts are supported across wizard steps and case actions. Screen-reader labels are enabled for all primary controls.
-      </div>
-    </div>
-  )
-}
-
-function CitizenHome({ firs, onFileAction, onCasesAction, onResumeDraft }) {
+function CitizenHome({ firs, onFileAction, onCasesAction }) {
   const awaitingAck = firs.filter((fir) => fir.status === 'AWAITING_CITIZEN_ACK').length
   const pendingEvidence = firs.filter((fir) => fir.status !== 'CLOSED_CONFIRMED' && fir.status !== 'CLOSED_AUTO_ACK').length
 
@@ -91,12 +134,8 @@ function CitizenHome({ firs, onFileAction, onCasesAction, onResumeDraft }) {
             <p className="font-semibold text-policeBlue">File Complaint</p>
             <p className="mt-1 text-xs text-slate-600">Start a guided FIR wizard.</p>
           </button>
-          <button type="button" data-testid="citizen-resume-draft" onClick={onResumeDraft} className="rounded-xl border border-policeBlue-100 bg-white p-4 text-left hover:bg-slate-50">
-            <p className="font-semibold text-policeBlue">Continue Draft</p>
-            <p className="mt-1 text-xs text-slate-600">Resume your latest saved draft.</p>
-          </button>
           <button type="button" data-testid="citizen-upload-evidence" onClick={onCasesAction} className="rounded-xl border border-policeBlue-100 bg-white p-4 text-left hover:bg-slate-50">
-            <p className="font-semibold text-policeBlue">Upload Evidence</p>
+            <p className="font-semibold text-policeBlue">Uploaded Evidence</p>
             <p className="mt-1 text-xs text-slate-600">Attach files from case details.</p>
           </button>
           <button type="button" data-testid="citizen-pending-ack" onClick={onCasesAction} className="rounded-xl border border-policeBlue-100 bg-amber-50 p-4 text-left hover:bg-amber-100">
@@ -130,6 +169,9 @@ function FirWizard({ onSubmitted, resumeSignal }) {
       title: '',
       description: '',
       location: '',
+      locationState: '',
+      locationCity: '',
+      locationArea: '',
       aadhaarNumber: '',
       ocrExtractedText: '',
       ocrKeywords: '',
@@ -148,6 +190,17 @@ function FirWizard({ onSubmitted, resumeSignal }) {
 
   const values = watch()
 
+  const buildFirPayload = useCallback((sourceValues) => ({
+    title: sourceValues.title || null,
+    description: sourceValues.description || null,
+    location: sourceValues.location || null,
+    aadhaarNumber: String(sourceValues.aadhaarNumber || '').trim() || null,
+    ocrExtractedText: sourceValues.ocrExtractedText || null,
+    ocrKeywords: sourceValues.ocrKeywords || null,
+    suggestedCategory: sourceValues.suggestedCategory || null,
+    suggestedPriority: sourceValues.suggestedPriority || null,
+  }), [])
+
   const loadLatestDraft = useCallback(async () => {
     try {
       const { data } = await http.get('/citizen/fir/draft/latest')
@@ -156,6 +209,9 @@ function FirWizard({ onSubmitted, resumeSignal }) {
       setValue('title', data.title || '')
       setValue('description', data.description || '')
       setValue('location', data.location || '')
+      setValue('locationState', data.locationState || '')
+      setValue('locationCity', data.locationCity || '')
+      setValue('locationArea', data.locationArea || data.location || '')
       setValue('aadhaarNumber', data.aadhaarNumber || '')
       setValue('ocrExtractedText', data.ocrExtractedText || '')
       setValue('ocrKeywords', data.ocrKeywords || '')
@@ -174,13 +230,21 @@ function FirWizard({ onSubmitted, resumeSignal }) {
   }, [loadLatestDraft, resumeSignal])
 
   useEffect(() => {
+    const composedLocation = [values.locationState, values.locationCity, values.locationArea]
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join(', ')
+    setValue('location', composedLocation)
+  }, [values.locationState, values.locationCity, values.locationArea, setValue])
+
+  useEffect(() => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
     }
     saveTimerRef.current = setTimeout(async () => {
       const hasData = Object.values(values).some((value) => String(value || '').trim().length > 0)
       if (!hasData || receipt) return
-      const payload = { ...values, currentStep: step }
+      const payload = { ...buildFirPayload(values), currentStep: step }
       try {
         if (!draftId) {
           const { data } = await http.post('/citizen/fir/draft', payload)
@@ -193,7 +257,7 @@ function FirWizard({ onSubmitted, resumeSignal }) {
       }
     }, 1500)
     return () => clearTimeout(saveTimerRef.current)
-  }, [values, step, draftId, receipt])
+  }, [values, step, draftId, receipt, buildFirPayload])
 
   const validateStep = () => {
     const current = getValues()
@@ -236,7 +300,10 @@ function FirWizard({ onSubmitted, resumeSignal }) {
       setValue('suggestedPriority', data.suggestedPriority || '')
       if (data.suggestedTitle) setValue('title', data.suggestedTitle)
       if (data.suggestedDescription) setValue('description', data.suggestedDescription)
-      if (data.suggestedLocation) setValue('location', data.suggestedLocation)
+      if (data.suggestedLocation) {
+        setValue('location', data.suggestedLocation)
+        setValue('locationArea', data.suggestedLocation)
+      }
       setMessage({ type: 'success', text: 'OCR suggestions applied. You can edit before submit.' })
     } catch (err) {
       setMessage({ type: 'error', text: extractApiError(err, 'OCR failed.') })
@@ -257,7 +324,10 @@ function FirWizard({ onSubmitted, resumeSignal }) {
       setValue('ocrKeywords', data.keywords || '')
       if (data.suggestedTitle) setValue('title', data.suggestedTitle)
       if (data.suggestedDescription) setValue('description', data.suggestedDescription)
-      if (data.suggestedLocation) setValue('location', data.suggestedLocation)
+      if (data.suggestedLocation) {
+        setValue('location', data.suggestedLocation)
+        setValue('locationArea', data.suggestedLocation)
+      }
       setMessage({ type: 'success', text: 'Voice notes analyzed and applied.' })
       voice.stop()
       voice.clear()
@@ -273,7 +343,7 @@ function FirWizard({ onSubmitted, resumeSignal }) {
     setBusy(true)
     setMessage(null)
     try {
-      const payload = getValues()
+      const payload = buildFirPayload(getValues())
       const { data } = await http.post('/citizen/fir', payload)
       setReceipt(data)
       onSubmitted?.()
@@ -282,6 +352,9 @@ function FirWizard({ onSubmitted, resumeSignal }) {
         title: '',
         description: '',
         location: '',
+        locationState: '',
+        locationCity: '',
+        locationArea: '',
         aadhaarNumber: payload.aadhaarNumber || '',
         ocrExtractedText: '',
         ocrKeywords: '',
@@ -326,11 +399,14 @@ function FirWizard({ onSubmitted, resumeSignal }) {
       {step === 2 && (
         <div className="space-y-3">
           <p className="text-sm font-semibold text-policeBlue">2. Location and Category Hints</p>
-          <input data-testid="wizard-location" className="input" placeholder="Incident location" {...register('location', { required: true })} />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <input className="input" placeholder="Suggested category" readOnly {...register('suggestedCategory')} />
-            <input className="input" placeholder="Suggested priority" readOnly {...register('suggestedPriority')} />
-          </div>
+          <select data-testid="wizard-location-state" className="input" defaultValue="" {...register('locationState', { required: true })}>
+            <option value="" disabled>Select State</option>
+            {INDIAN_STATES.map((stateName) => (
+              <option key={stateName} value={stateName}>{stateName}</option>
+            ))}
+          </select>
+          <input data-testid="wizard-location-city" className="input" placeholder="City" {...register('locationCity', { required: true })} />
+          <input data-testid="wizard-location-area" className="input" placeholder="Specific area" {...register('locationArea', { required: true })} />
         </div>
       )}
 
@@ -354,6 +430,9 @@ function FirWizard({ onSubmitted, resumeSignal }) {
               <button type="button" className="btn btn-sm btn-ghost" onClick={voice.clear}>Clear</button>
             </div>
             {voice.error && <p className="mt-2 text-xs text-red-500">{voice.error}</p>}
+            {!voice.error && !voice.permissionGranted && (
+              <p className="mt-2 text-xs text-slate-600">Click Start Recording and allow microphone access when prompted.</p>
+            )}
             <p className="mt-2 rounded-lg bg-white p-2 text-xs text-slate-600">{voice.transcript || 'Voice transcript will appear here.'}</p>
           </div>
         </div>
@@ -441,6 +520,40 @@ function CaseList({ firs, loading }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </Panel>
+  )
+}
+
+function UploadedEvidenceList({ firs, loading }) {
+  if (loading) return <LoadingSpinner label="Loading uploaded evidence..." />
+  if (!firs.length) return <EmptyState icon="FIR" title="No FIRs yet" description="Submit your first FIR to upload evidence." />
+
+  const ordered = [...firs].sort((a, b) => (a.id || 0) - (b.id || 0))
+
+  return (
+    <Panel title="Uploaded Evidence">
+      <div className="space-y-3">
+        {ordered.map((fir) => (
+          <div key={fir.id} className="rounded-xl border border-policeBlue-100 bg-white p-3">
+            <p className="text-sm font-semibold text-policeBlue">FIR #{fir.id} - {fir.title || 'Untitled Case'}</p>
+            <p className="mt-1 text-xs text-slate-500">Status: {fir.status}</p>
+            {fir.evidence?.length ? (
+              <div className="mt-2 space-y-2">
+                {fir.evidence.map((ev) => (
+                  <div key={ev.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
+                    <p className="font-medium text-policeBlue">{ev.fileName}</p>
+                    <p className="text-slate-600">
+                      {ev.fileType} | {Math.round((ev.fileSizeBytes || 0) / 1024)} KB | {ev.uploadedAt ? new Date(ev.uploadedAt).toLocaleString() : '-'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-slate-500">No evidence uploaded for this FIR.</p>
+            )}
+          </div>
+        ))}
       </div>
     </Panel>
   )
@@ -658,30 +771,65 @@ function CitizenCaseDetail({ id }) {
 
 function CitizenMain() {
   const { firs, loading, error, reload } = useFirs()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('home')
   const [resumeSignal, setResumeSignal] = useState(0)
+  const [evidenceFirs, setEvidenceFirs] = useState([])
+  const [evidenceLoading, setEvidenceLoading] = useState(false)
+  const tabParam = searchParams.get('tab')
+
+  useEffect(() => {
+    const nextTab = tabParam === 'file' || tabParam === 'cases' || tabParam === 'evidence' ? tabParam : 'home'
+    if (nextTab !== activeTab) setActiveTab(nextTab)
+  }, [tabParam, activeTab])
+
+  const switchTab = (tab) => {
+    setActiveTab(tab)
+    setSearchParams({ tab })
+  }
+
+  useEffect(() => {
+    const loadEvidenceDetails = async () => {
+      if (activeTab !== 'evidence' || !firs.length) return
+      setEvidenceLoading(true)
+      try {
+        const details = await Promise.all(
+          [...firs]
+            .sort((a, b) => (a.id || 0) - (b.id || 0))
+            .map(async (fir) => {
+              try {
+                const { data } = await http.get(`/citizen/fir/${fir.id}`)
+                return data
+              } catch {
+                return fir
+              }
+            }),
+        )
+        setEvidenceFirs(details)
+      } finally {
+        setEvidenceLoading(false)
+      }
+    }
+    loadEvidenceDetails()
+  }, [activeTab, firs])
 
   return (
     <PageTemplate title="Citizen Services" subtitle="Guided filing, evidence workflow, and transparent case tracking">
       <div className="space-y-4">
       {error && <Alert type="error">{error}</Alert>}
-      <AccessibilityControls />
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className={`btn btn-sm ${activeTab === 'home' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActiveTab('home')}>Home</button>
-        <button type="button" className={`btn btn-sm ${activeTab === 'file' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActiveTab('file')}>File FIR</button>
-        <button type="button" className={`btn btn-sm ${activeTab === 'cases' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActiveTab('cases')}>My Cases</button>
+        <button type="button" className={`btn btn-sm ${activeTab === 'home' ? 'btn-primary' : 'btn-outline'}`} onClick={() => switchTab('home')}>Home</button>
+        <button type="button" className={`btn btn-sm ${activeTab === 'file' ? 'btn-primary' : 'btn-outline'}`} onClick={() => switchTab('file')}>File FIR</button>
+        <button type="button" className={`btn btn-sm ${activeTab === 'cases' ? 'btn-primary' : 'btn-outline'}`} onClick={() => switchTab('cases')}>My Cases</button>
+        <button type="button" className={`btn btn-sm ${activeTab === 'evidence' ? 'btn-primary' : 'btn-outline'}`} onClick={() => switchTab('evidence')}>Uploaded Evidence</button>
       </div>
 
       {activeTab === 'home' && (
         <CitizenHome
           firs={firs}
-          onFileAction={() => setActiveTab('file')}
-          onCasesAction={() => setActiveTab('cases')}
-          onResumeDraft={() => {
-            setActiveTab('file')
-            setResumeSignal((v) => v + 1)
-          }}
+          onFileAction={() => switchTab('file')}
+          onCasesAction={() => switchTab('evidence')}
         />
       )}
 
@@ -693,6 +841,7 @@ function CitizenMain() {
       )}
 
       {activeTab === 'cases' && <CaseList firs={firs} loading={loading} />}
+      {activeTab === 'evidence' && <UploadedEvidenceList firs={evidenceFirs.length ? evidenceFirs : firs} loading={loading || evidenceLoading} />}
       </div>
     </PageTemplate>
   )

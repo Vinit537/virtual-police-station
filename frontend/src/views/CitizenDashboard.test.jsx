@@ -68,7 +68,9 @@ describe('CitizenDashboard V2', () => {
     fireEvent.change(screen.getByPlaceholderText('Complaint title'), { target: { value: 'Old title' } })
     fireEvent.change(screen.getByPlaceholderText('Describe incident in detail'), { target: { value: 'Old description' } })
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    fireEvent.change(screen.getByPlaceholderText('Incident location'), { target: { value: 'Old location' } })
+    fireEvent.change(screen.getByTestId('wizard-location-state'), { target: { value: 'Madhya Pradesh' } })
+    fireEvent.change(screen.getByPlaceholderText('City'), { target: { value: 'Indore' } })
+    fireEvent.change(screen.getByPlaceholderText('Specific area'), { target: { value: 'Old location' } })
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
 
     const fileInput = screen.getByLabelText('OCR File Upload')
@@ -87,7 +89,7 @@ describe('CitizenDashboard V2', () => {
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-    expect(screen.getByPlaceholderText('Incident location')).toHaveValue('Indore')
+    expect(screen.getByPlaceholderText('Specific area')).toHaveValue('Indore')
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.getByPlaceholderText('Complaint title')).toHaveValue('Fraud complaint')
     expect(screen.getByPlaceholderText('Describe incident in detail')).toHaveValue('Fraud complaint text')

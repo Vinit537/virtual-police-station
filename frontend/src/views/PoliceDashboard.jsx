@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { http } from '../api/http'
 import { useAuth } from '../context/AuthContext'
 import { extractApiError } from '../api/hooks'
@@ -81,9 +82,11 @@ function filterByPreset(fir, preset, userName) {
   if (preset === PRESETS.ACTION_REQUIRED) return fir.status === 'DISPUTED_REVIEW' || fir.status === 'AWAITING_CITIZEN_ACK'
   if (preset === PRESETS.ALL_OPEN) return !CLOSED_STATES.has(fir.status)
   if (preset === PRESETS.MY_ASSIGNED) {
+    const assignee = (fir.assignedOfficerName || fir.assignedTo || fir.assignee || '').toLowerCase()
+    const userToken = (userName || '').toLowerCase()
     return !CLOSED_STATES.has(fir.status)
-      && Boolean(fir.assignedOfficerName)
-      && fir.assignedOfficerName.toLowerCase() === (userName || '').toLowerCase()
+      && Boolean(assignee)
+      && (assignee === userToken || assignee.includes(userToken))
   }
   if (preset === PRESETS.CLOSED_ARCHIVE) return CLOSED_STATES.has(fir.status)
   return true
@@ -367,16 +370,16 @@ function CompactKanban({ cases, selectedCaseId, onSelect }) {
 
 export function PoliceDashboard() {
   const { user } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [queue, setQueue] = useState([])
   const [selectedCaseId, setSelectedCaseId] = useState(null)
   const [selectedCase, setSelectedCase] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [activePreset, setActivePreset] = useState(PRESETS.ACTION_REQUIRED)
-  const [viewMode, setViewMode] = useState('inbox')
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const [primaryPriority, setPrimaryPriority] = useState('')
   const [advanced, setAdvanced] = useState({
     station: '',
     assignee: '',
@@ -384,6 +387,15 @@ export function PoliceDashboard() {
   })
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 1024 : false))
+  const activePageTab = useMemo(() => {
+    const tab = new URLSearchParams(location.search).get('tab')
+    return tab === 'dashboard' ? 'dashboard' : 'case-desk'
+  }, [location.search])
+
+  const openCaseDeskWithPreset = (preset) => {
+    setActivePreset(preset)
+    navigate('/police?tab=case-desk')
+  }
 
   const loadQueue = async () => {
     setLoading(true)
@@ -429,7 +441,6 @@ export function PoliceDashboard() {
     const now = Date.now()
     const items = queue.filter((fir) => {
       if (!filterByPreset(fir, activePreset, user?.name)) return false
-      if (primaryPriority && fir.priority !== primaryPriority) return false
       if (!caseMatchesSearch(fir, search)) return false
       if (advanced.station && !(fir.assignedStation || '').toLowerCase().includes(advanced.station.trim().toLowerCase())) return false
       if (advanced.assignee && !(fir.assignedOfficerName || '').toLowerCase().includes(advanced.assignee.trim().toLowerCase())) return false
@@ -443,7 +454,7 @@ export function PoliceDashboard() {
       return true
     })
     return items.slice().sort((a, b) => a.rankScore - b.rankScore)
-  }, [queue, activePreset, user?.name, primaryPriority, search, advanced])
+  }, [queue, activePreset, user?.name, search, advanced])
 
   useEffect(() => {
     if (!filteredCases.length) {
@@ -487,14 +498,37 @@ export function PoliceDashboard() {
     <PageTemplate title="Police Operations" subtitle="Prioritized inbox and case workbench for synchronized citizen workflow">
       <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard title="Open Cases" value={stats.totalOpen} tone="blue" />
-        <StatCard title="Action Required" value={stats.actionRequired} tone="red" />
-        <StatCard title="My Assigned" value={stats.myAssigned} tone="gold" />
+        <button type="button" className="text-left" onClick={() => openCaseDeskWithPreset(PRESETS.ALL_OPEN)}>
+          <StatCard title="Open Cases" value={stats.totalOpen} tone="blue" />
+        </button>
+        <button type="button" className="text-left" onClick={() => openCaseDeskWithPreset(PRESETS.ACTION_REQUIRED)}>
+          <StatCard title="Action Required" value={stats.actionRequired} tone="red" />
+        </button>
+        <button type="button" className="text-left" onClick={() => openCaseDeskWithPreset(PRESETS.MY_ASSIGNED)}>
+          <StatCard title="My Assigned" value={stats.myAssigned} tone="gold" />
+        </button>
       </div>
 
       {error && <Alert type="error">{error}</Alert>}
 
-      <Panel title="Police Operations">
+      {activePageTab === 'dashboard' && (
+        <Panel title="Operations Snapshot">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-policeBlue-100 bg-policeBlue-50 p-4">
+              <p className="text-sm font-semibold text-policeBlue">Action Required Cases</p>
+              <p className="mt-1 text-2xl font-bold text-policeBlue">{stats.actionRequired}</p>
+              <p className="mt-1 text-xs text-slate-600">Cases awaiting acknowledgement or dispute response.</p>
+            </div>
+            <div className="rounded-xl border border-policeBlue-100 bg-white p-4">
+              <p className="text-sm font-semibold text-policeBlue">Assigned to You</p>
+              <p className="mt-1 text-2xl font-bold text-policeBlue">{stats.myAssigned}</p>
+              <p className="mt-1 text-xs text-slate-600">Open cases currently mapped to your officer account.</p>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {activePageTab === 'case-desk' && <Panel title="Police Operations">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-2">
             <button type="button" className={`btn btn-xs ${activePreset === PRESETS.ACTION_REQUIRED ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActivePreset(PRESETS.ACTION_REQUIRED)}>Action Required</button>
@@ -503,20 +537,12 @@ export function PoliceDashboard() {
             <button type="button" className={`btn btn-xs ${activePreset === PRESETS.CLOSED_ARCHIVE ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActivePreset(PRESETS.CLOSED_ARCHIVE)}>Closed Archive</button>
           </div>
           <div className="flex gap-2">
-            <button type="button" className={`btn btn-xs ${viewMode === 'inbox' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setViewMode('inbox')}>Inbox</button>
-            <button type="button" className={`btn btn-xs ${viewMode === 'kanban' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setViewMode('kanban')}>Kanban</button>
+            <button type="button" className="btn btn-xs btn-primary">Inbox</button>
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_180px_auto]">
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
           <input className="input" placeholder="Search FIR #, title, citizen, station..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          <select className="input" value={primaryPriority} onChange={(e) => setPrimaryPriority(e.target.value)}>
-            <option value="">All Priorities</option>
-            <option value="LOW">LOW</option>
-            <option value="MEDIUM">MEDIUM</option>
-            <option value="HIGH">HIGH</option>
-            <option value="CRITICAL">CRITICAL</option>
-          </select>
           <button type="button" className="btn btn-outline" onClick={() => setAdvancedFiltersOpen((v) => !v)}>
             {advancedFiltersOpen ? 'Hide Advanced Filters' : 'Advanced Filters'}
           </button>
@@ -541,43 +567,39 @@ export function PoliceDashboard() {
           <EmptyState icon="LIST" title="No cases in this view" description="Try a different preset or filter." />
         ) : (
           <div className="mt-4">
-            {viewMode === 'kanban' ? (
-              <CompactKanban cases={filteredCases} selectedCaseId={selectedCaseId} onSelect={loadCaseDetail} />
-            ) : (
-              <div className="grid gap-3 lg:grid-cols-[380px_1fr]">
-                {(!mobileDetailOpen || !isMobile) && (
-                  <div className="max-h-[75vh] space-y-2 overflow-y-auto pr-1">
-                    {filteredCases.map((fir) => (
-                      <InboxRow
-                        key={fir.id}
-                        fir={fir}
-                        active={selectedCaseId === fir.id}
-                        onSelect={(id) => {
-                          loadCaseDetail(id)
-                          if (isMobile) setMobileDetailOpen(true)
-                        }}
-                        onMoveStatus={moveStatus}
-                      />
-                    ))}
-                  </div>
-                )}
-                <div className={`${mobileDetailOpen ? 'block' : 'hidden'} lg:block`}>
-                  {selectedCase ? (
-                    <div className="space-y-3">
-                      <button type="button" className="btn btn-xs btn-outline lg:hidden" onClick={() => setMobileDetailOpen(false)}>
-                        Back to Inbox
-                      </button>
-                      <Workbench fir={selectedCase} onRefresh={refreshAll} />
-                    </div>
-                  ) : (
-                    <EmptyState icon="CASE" title="Select a case" description="Choose a case from inbox to open workbench." />
-                  )}
+            <div className="grid gap-3 lg:grid-cols-[380px_1fr]">
+              {(!mobileDetailOpen || !isMobile) && (
+                <div className="max-h-[75vh] space-y-2 overflow-y-auto pr-1">
+                  {filteredCases.map((fir) => (
+                    <InboxRow
+                      key={fir.id}
+                      fir={fir}
+                      active={selectedCaseId === fir.id}
+                      onSelect={(id) => {
+                        loadCaseDetail(id)
+                        if (isMobile) setMobileDetailOpen(true)
+                      }}
+                      onMoveStatus={moveStatus}
+                    />
+                  ))}
                 </div>
+              )}
+              <div className={`${mobileDetailOpen ? 'block' : 'hidden'} lg:block`}>
+                {selectedCase ? (
+                  <div className="space-y-3">
+                    <button type="button" className="btn btn-xs btn-outline lg:hidden" onClick={() => setMobileDetailOpen(false)}>
+                      Back to Inbox
+                    </button>
+                    <Workbench fir={selectedCase} onRefresh={refreshAll} />
+                  </div>
+                ) : (
+                  <EmptyState icon="CASE" title="Select a case" description="Choose a case from inbox to open workbench." />
+                )}
               </div>
-            )}
+            </div>
           </div>
         )}
-      </Panel>
+      </Panel>}
       </div>
     </PageTemplate>
   )

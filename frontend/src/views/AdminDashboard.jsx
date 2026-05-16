@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { http } from '../api/http'
 import { extractApiError } from '../api/hooks'
 import { Alert, PriorityBadge, StatusBadge } from '../ui/Shared'
@@ -442,6 +443,11 @@ function Workbench({ detail, officers, onActionSuccess }) {
 
 export function AdminDashboard() {
   const { t } = useTranslation()
+  const location = useLocation()
+  const activePageTab = useMemo(() => {
+    const tab = new URLSearchParams(location.search).get('tab')
+    return tab === 'dashboard' ? 'dashboard' : 'control-room'
+  }, [location.search])
   const [preset, setPreset] = useState('CRITICAL_ATTENTION')
   const [queue, setQueue] = useState([])
   const [queueLoading, setQueueLoading] = useState(false)
@@ -458,7 +464,6 @@ export function AdminDashboard() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [officers, setOfficers] = useState([])
   const [search, setSearch] = useState('')
-  const [priority, setPriority] = useState('')
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false)
   const [advanced, setAdvanced] = useState({ status: '', station: '', assignee: '', slaBucket: '', escalated: '' })
   const [lastRefreshAt, setLastRefreshAt] = useState(null)
@@ -494,7 +499,6 @@ export function AdminDashboard() {
       const params = {
         preset,
         status: advanced.status || undefined,
-        priority: priority || undefined,
         station: advanced.station || undefined,
         assignee: advanced.assignee || undefined,
         slaBucket: advanced.slaBucket || undefined,
@@ -585,7 +589,7 @@ export function AdminDashboard() {
 
   useEffect(() => {
     loadQueue()
-  }, [preset, priority, advanced.status, advanced.station, advanced.assignee, advanced.slaBucket, advanced.escalated])
+  }, [preset, advanced.status, advanced.station, advanced.assignee, advanced.slaBucket, advanced.escalated])
 
   useEffect(() => {
     if (!queue.length) {
@@ -615,7 +619,7 @@ export function AdminDashboard() {
       }
     }, 30_000)
     return () => clearInterval(timer)
-  }, [selectedCaseId, preset, priority, advanced.status, advanced.station, advanced.assignee, advanced.slaBucket, advanced.escalated])
+  }, [selectedCaseId, preset, advanced.status, advanced.station, advanced.assignee, advanced.slaBucket, advanced.escalated])
 
   const filteredQueue = useMemo(() => {
     if (!search.trim()) return queue
@@ -646,7 +650,7 @@ export function AdminDashboard() {
 
       {(queueError || detailError) && <Alert type="error">{queueError || detailError}</Alert>}
 
-      <Panel
+      {activePageTab === 'control-room' && <Panel
         title="Admin Command Centre"
         action={(
           <div className="flex items-center gap-2">
@@ -670,15 +674,8 @@ export function AdminDashboard() {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_180px_auto]">
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
           <input className="input" placeholder="Search FIR #, title, citizen, station..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          <select className="input" value={priority} onChange={(e) => setPriority(e.target.value)}>
-            <option value="">All Priorities</option>
-            <option value="LOW">LOW</option>
-            <option value="MEDIUM">MEDIUM</option>
-            <option value="HIGH">HIGH</option>
-            <option value="CRITICAL">CRITICAL</option>
-          </select>
           <button type="button" className="btn btn-outline" onClick={() => setAdvancedFiltersOpen((v) => !v)}>
             {advancedFiltersOpen ? 'Hide Advanced Filters' : 'Advanced Filters'}
           </button>
@@ -751,9 +748,9 @@ export function AdminDashboard() {
             </div>
           </div>
         )}
-      </Panel>
+      </Panel>}
 
-      <Panel title={t('adm_analytics') || 'System Analytics'}>
+      {activePageTab === 'dashboard' && <Panel title={t('adm_analytics') || 'System Analytics'}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard title={t('adm_users')} value={stats.users} tone="blue" />
           <StatCard title={t('adm_officers')} value={stats.officers} tone="gold" />
@@ -776,7 +773,7 @@ export function AdminDashboard() {
             {analyticsLoading ? <LoadingSpinner label={t('loading')} /> : <EventLog events={events} t={t} />}
           </Panel>
         </div>
-      </Panel>
+      </Panel>}
       </div>
     </PageTemplate>
   )
