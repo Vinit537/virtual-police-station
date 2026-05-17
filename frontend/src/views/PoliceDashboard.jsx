@@ -66,27 +66,38 @@ function enrichCase(fir) {
 function caseMatchesSearch(fir, text) {
   if (!text.trim()) return true
   const q = text.trim().toLowerCase()
+  const normalizedQ = q.replace(/^fir[\s#:-]*/i, '').replace(/^#/, '')
+  const safe = (value) => String(value || '')
+  const idText = safe(fir.id)
   const blob = [
-    String(fir.id),
-    fir.title,
-    fir.description,
-    fir.citizenName,
-    fir.assignedStation,
-    fir.assignedOfficerName,
-    fir.status,
+    idText,
+    `#${idText}`,
+    `fir ${idText}`,
+    safe(fir.title),
+    safe(fir.description),
+    safe(fir.citizenName),
+    safe(fir.assignedStation),
+    safe(fir.assignedOfficerName),
+    safe(fir.status),
+    safe(fir.priority),
   ].join(' ').toLowerCase()
-  return blob.includes(q)
+  return blob.includes(q) || blob.includes(normalizedQ)
 }
 
 function filterByPreset(fir, preset, userName) {
   if (preset === PRESETS.ACTION_REQUIRED) return fir.status === 'DISPUTED_REVIEW' || fir.status === 'AWAITING_CITIZEN_ACK'
   if (preset === PRESETS.ALL_OPEN) return !CLOSED_STATES.has(fir.status)
   if (preset === PRESETS.MY_ASSIGNED) {
-    const assignee = (fir.assignedOfficerName || fir.assignedTo || fir.assignee || '').toLowerCase()
-    const userToken = (userName || '').toLowerCase()
+    const normalize = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+    const assignee = normalize(fir.assignedOfficerName || fir.assignedTo || fir.assignee || '')
+    const userToken = normalize(userName || '')
+    const userParts = userToken.split(' ').filter(Boolean)
+    const hasNameMatch = assignee === userToken
+      || assignee.includes(userToken)
+      || userParts.some((part) => part.length > 2 && assignee.includes(part))
     return !CLOSED_STATES.has(fir.status)
       && Boolean(assignee)
-      && (assignee === userToken || assignee.includes(userToken))
+      && hasNameMatch
   }
   if (preset === PRESETS.CLOSED_ARCHIVE) return CLOSED_STATES.has(fir.status)
   return true

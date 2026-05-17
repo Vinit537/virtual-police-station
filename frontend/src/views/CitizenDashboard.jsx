@@ -9,7 +9,7 @@ import { PageTemplate } from '../ui/DesignSystem'
 
 const SpeechRecognition = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
 const MAX_FILE_BYTES = 25 * 1024 * 1024
-const ACCEPTED_EVIDENCE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'pdf', 'txt', 'doc', 'docx', 'rtf', 'odt']
+const ACCEPTED_EVIDENCE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'pdf', 'txt', 'doc', 'docx', 'rtf', 'odt', 'mp3', 'wav', 'm4a', 'mp4', 'webm', 'mov']
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
   'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur',
@@ -122,7 +122,7 @@ function validateEvidenceFile(file) {
   return null
 }
 
-function CitizenHome({ firs, onFileAction, onCasesAction }) {
+function CitizenHome({ firs, onFileAction, onEvidenceAction, onPendingAckAction }) {
   const awaitingAck = firs.filter((fir) => fir.status === 'AWAITING_CITIZEN_ACK').length
   const pendingEvidence = firs.filter((fir) => fir.status !== 'CLOSED_CONFIRMED' && fir.status !== 'CLOSED_AUTO_ACK').length
 
@@ -134,11 +134,11 @@ function CitizenHome({ firs, onFileAction, onCasesAction }) {
             <p className="font-semibold text-policeBlue">File Complaint</p>
             <p className="mt-1 text-xs text-slate-600">Start a guided FIR wizard.</p>
           </button>
-          <button type="button" data-testid="citizen-upload-evidence" onClick={onCasesAction} className="rounded-xl border border-policeBlue-100 bg-white p-4 text-left hover:bg-slate-50">
+          <button type="button" data-testid="citizen-upload-evidence" onClick={onEvidenceAction} className="rounded-xl border border-policeBlue-100 bg-white p-4 text-left hover:bg-slate-50">
             <p className="font-semibold text-policeBlue">Uploaded Evidence</p>
             <p className="mt-1 text-xs text-slate-600">Attach files from case details.</p>
           </button>
-          <button type="button" data-testid="citizen-pending-ack" onClick={onCasesAction} className="rounded-xl border border-policeBlue-100 bg-amber-50 p-4 text-left hover:bg-amber-100">
+          <button type="button" data-testid="citizen-pending-ack" onClick={onPendingAckAction} className="rounded-xl border border-policeBlue-100 bg-amber-50 p-4 text-left hover:bg-amber-100">
             <p className="font-semibold text-amber-700">Pending Acknowledgement</p>
             <p className="mt-1 text-xs text-slate-600">{awaitingAck} case(s) need your response.</p>
           </button>
@@ -484,12 +484,16 @@ function FirWizard({ onSubmitted, resumeSignal }) {
   )
 }
 
-function CaseList({ firs, loading }) {
+function CaseList({ firs, loading, onlyPendingAck = false }) {
   if (loading) return <LoadingSpinner label="Loading cases..." />
-  if (!firs.length) return <EmptyState icon="📂" title="No FIRs yet" description="File your first FIR using the guided wizard." />
+  const items = onlyPendingAck ? firs.filter((fir) => fir.status === 'AWAITING_CITIZEN_ACK') : firs
+  if (!items.length) {
+    if (onlyPendingAck) return <EmptyState icon="WAIT" title="No pending acknowledgements" description="You have no cases awaiting acknowledgement right now." />
+    return <EmptyState icon="📂" title="No FIRs yet" description="File your first FIR using the guided wizard." />
+  }
 
   return (
-    <Panel title="My Cases">
+    <Panel title={onlyPendingAck ? 'Pending Acknowledgement Cases' : 'My Cases'}>
       <div className="overflow-x-auto">
         <table className="data-table">
           <thead>
@@ -502,7 +506,7 @@ function CaseList({ firs, loading }) {
             </tr>
           </thead>
           <tbody>
-            {firs.map((fir) => (
+            {items.map((fir) => (
               <tr key={fir.id}>
                 <td className="font-mono text-xs">#{fir.id}</td>
                 <td>{fir.title}</td>
@@ -526,13 +530,69 @@ function CaseList({ firs, loading }) {
 }
 
 function UploadedEvidenceList({ firs, loading }) {
+  const [preview, setPreview] = useState(null)
+  const [openError, setOpenError] = useState('')
+
+  useEffect(() => {
+    return () => {
+      if (preview?.url) URL.revokeObjectURL(preview.url)
+    }
+  }, [preview])
+
   if (loading) return <LoadingSpinner label="Loading uploaded evidence..." />
   if (!firs.length) return <EmptyState icon="FIR" title="No FIRs yet" description="Submit your first FIR to upload evidence." />
 
   const ordered = [...firs].sort((a, b) => (a.id || 0) - (b.id || 0))
+  const openEvidence = async (evidenceId, fileName, fileType) => {
+    setOpenError('')
+    try {
+      const response = await http.get(`/citizen/evidence/${evidenceId}/download`, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: fileType || 'application/octet-stream' })
+      const url = URL.createObjectURL(blob)
+      const type = (fileType || '').toLowerCase()
+      if (preview?.url) URL.revokeObjectURL(preview.url)
+      if (type.startsWith('image/') || type.startsWith('audio/') || type.startsWith('video/') || type === 'application/pdf' || type === 'text/plain') {
+        setPreview({ url, type, fileName: fileName || `evidence-${evidenceId}` })
+      } else {
+        setPreview(null)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = fileName || `evidence-${evidenceId}`
+        link.click()
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      }
+    } catch {
+      setOpenError('Unable to open this evidence file right now. Please retry after backend restart.')
+    }
+  }
 
   return (
     <Panel title="Uploaded Evidence">
+      {openError && <Alert type="error">{openError}</Alert>}
+      {preview && (
+        <div className="mb-3 rounded-xl border border-policeBlue-100 bg-policeBlue-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-policeBlue">Preview: {preview.fileName}</p>
+            <button
+              type="button"
+              className="btn btn-xs btn-outline"
+              onClick={() => {
+                URL.revokeObjectURL(preview.url)
+                setPreview(null)
+              }}
+            >
+              Close Preview
+            </button>
+          </div>
+          <div className="mt-2 rounded-lg bg-white p-2">
+            {preview.type.startsWith('image/') && <img src={preview.url} alt={preview.fileName} className="max-h-80 rounded-lg object-contain" />}
+            {preview.type.startsWith('audio/') && <audio controls src={preview.url} className="w-full" />}
+            {preview.type.startsWith('video/') && <video controls src={preview.url} className="max-h-80 w-full rounded-lg" />}
+            {preview.type === 'application/pdf' && <iframe title={preview.fileName} src={preview.url} className="h-96 w-full rounded-lg border border-slate-200" />}
+            {preview.type === 'text/plain' && <iframe title={preview.fileName} src={preview.url} className="h-72 w-full rounded-lg border border-slate-200" />}
+          </div>
+        </div>
+      )}
       <div className="space-y-3">
         {ordered.map((fir) => (
           <div key={fir.id} className="rounded-xl border border-policeBlue-100 bg-white p-3">
@@ -542,10 +602,17 @@ function UploadedEvidenceList({ firs, loading }) {
               <div className="mt-2 space-y-2">
                 {fir.evidence.map((ev) => (
                   <div key={ev.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
-                    <p className="font-medium text-policeBlue">{ev.fileName}</p>
-                    <p className="text-slate-600">
-                      {ev.fileType} | {Math.round((ev.fileSizeBytes || 0) / 1024)} KB | {ev.uploadedAt ? new Date(ev.uploadedAt).toLocaleString() : '-'}
-                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-policeBlue">{ev.fileName}</p>
+                        <p className="text-slate-600">
+                          {ev.fileType} | {Math.round((ev.fileSizeBytes || 0) / 1024)} KB | {ev.uploadedAt ? new Date(ev.uploadedAt).toLocaleString() : '-'}
+                        </p>
+                      </div>
+                      <button type="button" className="btn btn-xs btn-outline" onClick={() => openEvidence(ev.id, ev.fileName, ev.fileType)}>
+                        Open
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -774,6 +841,7 @@ function CitizenMain() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('home')
   const [resumeSignal, setResumeSignal] = useState(0)
+  const [onlyPendingAck, setOnlyPendingAck] = useState(false)
   const [evidenceFirs, setEvidenceFirs] = useState([])
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const tabParam = searchParams.get('tab')
@@ -786,6 +854,7 @@ function CitizenMain() {
   const switchTab = (tab) => {
     setActiveTab(tab)
     setSearchParams({ tab })
+    if (tab !== 'cases') setOnlyPendingAck(false)
   }
 
   useEffect(() => {
@@ -829,7 +898,11 @@ function CitizenMain() {
         <CitizenHome
           firs={firs}
           onFileAction={() => switchTab('file')}
-          onCasesAction={() => switchTab('evidence')}
+          onEvidenceAction={() => switchTab('evidence')}
+          onPendingAckAction={() => {
+            setOnlyPendingAck(true)
+            switchTab('cases')
+          }}
         />
       )}
 
@@ -840,7 +913,7 @@ function CitizenMain() {
         />
       )}
 
-      {activeTab === 'cases' && <CaseList firs={firs} loading={loading} />}
+      {activeTab === 'cases' && <CaseList firs={firs} loading={loading} onlyPendingAck={onlyPendingAck} />}
       {activeTab === 'evidence' && <UploadedEvidenceList firs={evidenceFirs.length ? evidenceFirs : firs} loading={loading || evidenceLoading} />}
       </div>
     </PageTemplate>
@@ -854,3 +927,4 @@ export function CitizenDashboard() {
   }
   return <CitizenMain />
 }
+

@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -27,7 +28,14 @@ public class FirService {
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "application/rtf",
             "text/rtf",
-            "application/vnd.oasis.opendocument.text"
+            "application/vnd.oasis.opendocument.text",
+            "audio/mpeg",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/mp4",
+            "video/mp4",
+            "video/webm",
+            "video/quicktime"
     );
     private static final Set<String> ALLOWED_EVIDENCE_EXTENSIONS = Set.of(
             "jpg",
@@ -38,7 +46,13 @@ public class FirService {
             "doc",
             "docx",
             "rtf",
-            "odt"
+            "odt",
+            "mp3",
+            "wav",
+            "m4a",
+            "mp4",
+            "webm",
+            "mov"
     );
 
     private final FirReportRepository firReportRepository;
@@ -444,6 +458,17 @@ public class FirService {
     public EvidenceFile getEvidenceFile(Long evidenceId) {
         return evidenceRepository.findById(evidenceId)
                 .orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
+    }
+
+    public EvidenceFile getCitizenEvidenceFile(String email, Long evidenceId) {
+        UserAccount citizen = getCitizenByEmail(email);
+        EvidenceFile evidence = evidenceRepository.findById(evidenceId)
+                .orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
+        if (evidence.getFir() == null || evidence.getFir().getCitizen() == null
+                || !Objects.equals(evidence.getFir().getCitizen().getId(), citizen.getId())) {
+            throw new IllegalArgumentException("Evidence not found for current citizen");
+        }
+        return evidence;
     }
 
     public List<AuthDtos.StatusLogResponse> getTimeline(Long firId) {

@@ -105,7 +105,7 @@ describe('AdminDashboard V2 command centre', () => {
     )
 
     await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/admin/command/queue', expect.objectContaining({
-      params: expect.objectContaining({ preset: 'CRITICAL_ATTENTION' }),
+      params: expect.not.objectContaining({ preset: 'CRITICAL_ATTENTION' }),
     })))
     await screen.findByTestId('admin-inbox-2')
     await screen.findByText('Admin Workbench #2')

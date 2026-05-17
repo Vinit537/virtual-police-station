@@ -1,8 +1,12 @@
 package com.virtualpolice.vps.controller;
 
 import com.virtualpolice.vps.dto.AuthDtos;
+import com.virtualpolice.vps.model.EvidenceFile;
 import com.virtualpolice.vps.service.FirService;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
@@ -48,6 +52,19 @@ public class CitizenController {
     @GetMapping("/fir/{id}")
     public AuthDtos.FirResponse firDetail(Authentication auth, @PathVariable Long id) {
         return firService.getCitizenFirDetail(auth.getName(), id);
+    }
+
+    @GetMapping("/evidence/{evidenceId}/download")
+    public ResponseEntity<byte[]> downloadEvidence(Authentication auth, @PathVariable Long evidenceId) {
+        EvidenceFile ev = firService.getCitizenEvidenceFile(auth.getName(), evidenceId);
+        byte[] data = ev.getFileData();
+        if (data == null || data.length == 0) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + ev.getFileName() + "\"")
+                .contentType(MediaType.parseMediaType(ev.getFileType() != null ? ev.getFileType() : "application/octet-stream"))
+                .body(data);
     }
 
     @PostMapping("/fir/draft")

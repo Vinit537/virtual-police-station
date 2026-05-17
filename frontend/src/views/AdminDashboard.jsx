@@ -16,9 +16,8 @@ import { PageTemplate } from '../ui/DesignSystem'
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
 const PRESETS = [
-  { key: 'CRITICAL_ATTENTION', label: 'Critical Attention' },
+  { key: 'ALL_CASES', label: 'All Cases' },
   { key: 'SLA_BREACHES', label: 'SLA Breaches' },
-  { key: 'DISPUTED_REVIEW_WATCH', label: 'Disputed Review Watch' },
   { key: 'AWAITING_CITIZEN_ACK_WATCH', label: 'Awaiting Citizen Ack Watch' },
   { key: 'CLOSED_AUDIT_ARCHIVE', label: 'Closed Audit Archive' },
 ]
@@ -56,10 +55,10 @@ function isClosedStatus(status) {
 }
 
 function buildQueueStats(queue) {
-  const open = queue.filter((item) => !isClosedStatus(item.status)).length
+  const total = queue.length
   const critical = queue.filter((item) => item.requiresAdminAttention).length
   const breached = queue.filter((item) => item.isSlaBreached).length
-  return { open, critical, breached }
+  return { total, critical, breached }
 }
 
 function CrimeTrendChart({ trendData, t }) {
@@ -239,6 +238,29 @@ function Workbench({ detail, officers, onActionSuccess }) {
     }
   }
 
+  const submitReassign = async () => {
+    const officerId = reassign.officerId ? Number(reassign.officerId) : null
+    const station = reassign.station || null
+    const reason = reassign.reason || null
+    if (!officerId && !station) {
+      setError('Select an officer or provide station override for reassignment.')
+      return
+    }
+    if (commandApiAvailable) {
+      await runAction(() => http.post(`/admin/command/fir/${fir.id}/reassign`, {
+        officerId,
+        station,
+        reason,
+      }))
+      return
+    }
+    await runAction(() => http.post(`/v2/cases/${fir.id}/actions/reassign`, {
+      assignedOfficerId: officerId,
+      station,
+      reason,
+    }))
+  }
+
   const downloadEvidence = async (id, name) => {
     const response = await http.get(`/police/evidence/${id}/download`, { responseType: 'blob' })
     const url = URL.createObjectURL(response.data)
@@ -292,6 +314,13 @@ function Workbench({ detail, officers, onActionSuccess }) {
           <p><span className="font-semibold text-policeBlue">Ack due:</span> {formatDate(fir.acknowledgementDueAt)}</p>
           <p><span className="font-semibold text-policeBlue">Escalation due:</span> {formatDate(detail.escalationDueAt)}</p>
           <p className="text-slate-600">{fir.description}</p>
+          {!isClosedStatus(fir.status) && (
+            <div className="pt-2">
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => setTab('Interventions')}>
+                Assign / Reassign Officer
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -343,12 +372,8 @@ function Workbench({ detail, officers, onActionSuccess }) {
                   type="button"
                   data-testid="admin-reassign-submit"
                   className="btn btn-outline"
-                  disabled={busy || !commandApiAvailable}
-                  onClick={() => runAction(() => http.post(`/admin/command/fir/${fir.id}/reassign`, {
-                    officerId: reassign.officerId ? Number(reassign.officerId) : null,
-                    station: reassign.station || null,
-                    reason: reassign.reason || null,
-                  }))}
+                  disabled={busy}
+                  onClick={submitReassign}
                 >
                   {busy ? 'Saving...' : 'Apply Reassignment'}
                 </button>
@@ -448,7 +473,7 @@ export function AdminDashboard() {
     const tab = new URLSearchParams(location.search).get('tab')
     return tab === 'dashboard' ? 'dashboard' : 'control-room'
   }, [location.search])
-  const [preset, setPreset] = useState('CRITICAL_ATTENTION')
+  const [preset, setPreset] = useState('ALL_CASES')
   const [queue, setQueue] = useState([])
   const [queueLoading, setQueueLoading] = useState(false)
   const [queueError, setQueueError] = useState('')
@@ -463,12 +488,12 @@ export function AdminDashboard() {
   const [crimeTrend, setCrimeTrend] = useState([])
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [officers, setOfficers] = useState([])
-  const [search, setSearch] = useState('')
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false)
-  const [advanced, setAdvanced] = useState({ status: '', station: '', assignee: '', slaBucket: '', escalated: '' })
+  const [advanced, setAdvanced] = useState({ status: '', slaBucket: '', escalated: '' })
   const [lastRefreshAt, setLastRefreshAt] = useState(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 1024 : false))
+  const [globalQueueStats, setGlobalQueueStats] = useState({ total: 0, critical: 0, breached: 0 })
 
   const loadAnalytics = async () => {
     setAnalyticsLoading(true)
@@ -497,10 +522,8 @@ export function AdminDashboard() {
     setQueueError('')
     try {
       const params = {
-        preset,
+        preset: preset === 'ALL_CASES' ? undefined : preset,
         status: advanced.status || undefined,
-        station: advanced.station || undefined,
-        assignee: advanced.assignee || undefined,
         slaBucket: advanced.slaBucket || undefined,
         escalated: advanced.escalated === '' ? undefined : advanced.escalated === 'true',
       }
@@ -509,12 +532,12 @@ export function AdminDashboard() {
       setLastRefreshAt(new Date())
     } catch {
       try {
-        const fallback = await http.get('/police/fir')
+        const fallback = await http.get('/v2/cases/queue')
         const mapped = (fallback.data || []).map((item) => ({
           id: item.id,
           title: item.title,
-          description: item.description,
-          category: item.category,
+          description: item.description || '',
+          category: item.category || '',
           status: item.status,
           priority: item.priority,
           assignedStation: item.assignedStation,
@@ -522,10 +545,10 @@ export function AdminDashboard() {
           citizenAadhaarMasked: '************',
           assignedOfficerName: item.assignedOfficerName,
           createdAt: item.createdAt,
-          acknowledgementDueAt: item.acknowledgementDueAt,
+          acknowledgementDueAt: item.acknowledgementDueAt || null,
           isSlaBreached: false,
           slaBucket: 'NONE',
-          requiresAdminAttention: item.status === 'DISPUTED_REVIEW' || item.status === 'AWAITING_CITIZEN_ACK',
+          requiresAdminAttention: item.requiresAttention || item.status === 'DISPUTED_REVIEW' || item.status === 'AWAITING_CITIZEN_ACK',
           pendingCitizenAckHours: 0,
           escalatedAt: null,
           escalatedBy: null,
@@ -537,13 +560,32 @@ export function AdminDashboard() {
           adminNotePreview: '',
         }))
         setQueue(mapped)
-        setQueueError('Command API fallback applied. Restart backend with latest build to enable full admin interventions.')
+        setQueueError('Command API fallback applied in compatibility mode.')
         setLastRefreshAt(new Date())
       } catch (fallbackErr) {
         setQueueError(extractApiError(fallbackErr, 'Failed to load command queue.'))
       }
     } finally {
       setQueueLoading(false)
+    }
+  }
+
+  const loadGlobalStats = async () => {
+    try {
+      const { data } = await http.get('/admin/command/queue', { params: {} })
+      setGlobalQueueStats(buildQueueStats(data || []))
+    } catch {
+      try {
+        const fallback = await http.get('/v2/cases/queue')
+        const normalized = (fallback.data || []).map((item) => ({
+          status: item.status,
+          requiresAdminAttention: item.requiresAttention || item.status === 'DISPUTED_REVIEW' || item.status === 'AWAITING_CITIZEN_ACK',
+          isSlaBreached: false,
+        }))
+        setGlobalQueueStats(buildQueueStats(normalized))
+      } catch {
+        // Keep previous values if stats endpoint also fails.
+      }
     }
   }
 
@@ -556,21 +598,22 @@ export function AdminDashboard() {
       setDetail({ ...data, commandApiAvailable: true })
     } catch {
       try {
-        const fallback = await http.get(`/police/fir/${id}`)
+        const fallback = await http.get(`/v2/cases/${id}`)
+        const fallbackFir = fallback.data?.fir || fallback.data
         setDetail({
-          fir: fallback.data,
+          fir: fallbackFir,
           citizenEmail: 'Masked in compatibility mode',
           citizenAadhaar: '************',
           isSlaBreached: false,
           slaBucket: 'NONE',
-          requiresAdminAttention: fallback.data?.status === 'DISPUTED_REVIEW' || fallback.data?.status === 'AWAITING_CITIZEN_ACK',
+          requiresAdminAttention: fallbackFir?.requiresAttention || fallbackFir?.status === 'DISPUTED_REVIEW' || fallbackFir?.status === 'AWAITING_CITIZEN_ACK',
           pendingCitizenAckHours: 0,
           escalatedAt: null,
           escalatedBy: null,
           escalationReason: '',
           escalationDueAt: null,
-          lastPoliceActionAt: fallback.data?.lastOfficerActionAt || null,
-          lastCitizenActionAt: fallback.data?.acknowledgedAt || fallback.data?.disputedAt || fallback.data?.createdAt || null,
+          lastPoliceActionAt: fallbackFir?.lastOfficerActionAt || null,
+          lastCitizenActionAt: fallbackFir?.acknowledgedAt || fallbackFir?.disputedAt || fallbackFir?.createdAt || null,
           lastAdminActionAt: null,
           adminNotePreview: '',
           commandApiAvailable: false,
@@ -585,24 +628,28 @@ export function AdminDashboard() {
 
   useEffect(() => {
     loadAnalytics()
+    loadGlobalStats()
   }, [])
 
   useEffect(() => {
     loadQueue()
-  }, [preset, advanced.status, advanced.station, advanced.assignee, advanced.slaBucket, advanced.escalated])
+  }, [preset, advanced.status, advanced.slaBucket, advanced.escalated])
 
   useEffect(() => {
     if (!queue.length) {
-      setSelectedCaseId(null)
-      setDetail(null)
-      setMobileDetailOpen(false)
+      // Keep currently opened workbench visible even when active filters
+      // temporarily return zero rows after an action like reassignment.
+      return
+    }
+    if (!selectedCaseId) {
+      loadDetail(queue[0].id)
       return
     }
     const visible = queue.some((item) => item.id === selectedCaseId)
-    if (!visible) {
+    if (!visible && !detail) {
       loadDetail(queue[0].id)
     }
-  }, [queue])
+  }, [queue, selectedCaseId, detail])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -619,22 +666,13 @@ export function AdminDashboard() {
       }
     }, 30_000)
     return () => clearInterval(timer)
-  }, [selectedCaseId, preset, advanced.status, advanced.station, advanced.assignee, advanced.slaBucket, advanced.escalated])
-
-  const filteredQueue = useMemo(() => {
-    if (!search.trim()) return queue
-    const q = search.trim().toLowerCase()
-    return queue.filter((item) => (
-      `${item.id} ${item.title} ${item.description} ${item.citizenName} ${item.assignedStation || ''} ${item.assignedOfficerName || ''}`
-        .toLowerCase()
-        .includes(q)
-    ))
-  }, [queue, search])
+  }, [selectedCaseId, preset, advanced.status, advanced.slaBucket, advanced.escalated])
 
   const queueStats = useMemo(() => buildQueueStats(queue), [queue])
 
   const refreshNow = async () => {
     await loadQueue()
+    await loadGlobalStats()
     if (selectedCaseId) await loadDetail(selectedCaseId)
     await loadAnalytics()
   }
@@ -643,9 +681,9 @@ export function AdminDashboard() {
     <PageTemplate title="Admin Command Centre" subtitle="Operations-first supervisory hub with triage, interventions, and analytics">
       <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard title="Open Cases" value={queueStats.open} tone="blue" />
-        <StatCard title="Critical Attention" value={queueStats.critical} tone="red" />
-        <StatCard title="SLA Breaches" value={queueStats.breached} tone="gold" />
+        <StatCard title="Total Cases" value={stats.firs} tone="blue" />
+        <StatCard title="Active" value={stats.activeCases} tone="red" />
+        <StatCard title="SLA Breaches" value={globalQueueStats.breached} tone="gold" />
       </div>
 
       {(queueError || detailError) && <Alert type="error">{queueError || detailError}</Alert>}
@@ -674,15 +712,14 @@ export function AdminDashboard() {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
-          <input className="input" placeholder="Search FIR #, title, citizen, station..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="mt-3 grid gap-2 md:grid-cols-[auto]">
           <button type="button" className="btn btn-outline" onClick={() => setAdvancedFiltersOpen((v) => !v)}>
             {advancedFiltersOpen ? 'Hide Advanced Filters' : 'Advanced Filters'}
           </button>
         </div>
 
         {advancedFiltersOpen && (
-          <div className="mt-3 grid gap-2 md:grid-cols-5">
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
             <select className="input" value={advanced.status} onChange={(e) => setAdvanced((p) => ({ ...p, status: e.target.value }))}>
               <option value="">All Status</option>
               <option value="SUBMITTED">SUBMITTED</option>
@@ -693,8 +730,6 @@ export function AdminDashboard() {
               <option value="CLOSED_CONFIRMED">CLOSED_CONFIRMED</option>
               <option value="CLOSED_AUTO_ACK">CLOSED_AUTO_ACK</option>
             </select>
-            <input className="input" placeholder="Station" value={advanced.station} onChange={(e) => setAdvanced((p) => ({ ...p, station: e.target.value }))} />
-            <input className="input" placeholder="Assignee" value={advanced.assignee} onChange={(e) => setAdvanced((p) => ({ ...p, assignee: e.target.value }))} />
             <select className="input" value={advanced.slaBucket} onChange={(e) => setAdvanced((p) => ({ ...p, slaBucket: e.target.value }))}>
               <option value="">All SLA</option>
               <option value="OVERDUE">OVERDUE</option>
@@ -713,13 +748,13 @@ export function AdminDashboard() {
 
         {queueLoading ? (
           <LoadingSpinner label="Loading admin command queue..." />
-        ) : filteredQueue.length === 0 ? (
+        ) : queue.length === 0 ? (
           <EmptyState icon="INBX" title="No cases in this inbox view" description="Try another preset or filters." />
         ) : (
           <div className="mt-4 grid gap-3 lg:grid-cols-[390px_1fr]">
             {(!mobileDetailOpen || !isMobile) && (
               <div className="max-h-[75vh] space-y-2 overflow-y-auto pr-1">
-                {filteredQueue.map((item) => (
+                {queue.map((item) => (
                   <InboxRow
                     key={item.id}
                     item={item}
