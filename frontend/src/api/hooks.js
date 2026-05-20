@@ -119,14 +119,15 @@ export function useOtp() {
   const [error, setError] = useState('')
 
   const generate = useCallback(async (aadhaarNumber) => {
-    if (!aadhaarNumber || !/^\d{12}$/.test(aadhaarNumber)) {
+    const normalizedAadhaar = String(aadhaarNumber || '').replace(/\D/g, '').slice(0, 12)
+    if (!normalizedAadhaar || !/^\d{12}$/.test(normalizedAadhaar)) {
       setError('Please enter a valid 12-digit Aadhaar number.')
       return false
     }
     setLoading(true)
     setError('')
     try {
-      const { data } = await http.post('/auth/otp/generate', { aadhaarNumber })
+      const { data } = await http.post('/auth/otp/generate', { aadhaarNumber: normalizedAadhaar })
       setState({ generated: true, verified: false, debugOtp: data.debugOtp, verifiedAadhaar: '' })
       return true
     } catch (err) {
@@ -138,17 +139,27 @@ export function useOtp() {
   }, [])
 
   const verify = useCallback(async (aadhaarNumber, otp) => {
+    const normalizedAadhaar = String(aadhaarNumber || '').replace(/\D/g, '').slice(0, 12)
+    const normalizedOtp = String(otp || '').replace(/\D/g, '').slice(0, 6)
     if (!state.generated) { setError('Generate OTP first.'); return false }
+    if (!/^\d{12}$/.test(normalizedAadhaar)) {
+      setError('Please enter a valid 12-digit Aadhaar number.')
+      return false
+    }
+    if (!/^\d{6}$/.test(normalizedOtp)) {
+      setError('Please enter a valid 6-digit OTP.')
+      return false
+    }
     setLoading(true)
     setError('')
     try {
-      const { data } = await http.post('/auth/otp/verify', { aadhaarNumber, otp })
+      const { data } = await http.post('/auth/otp/verify', { aadhaarNumber: normalizedAadhaar, otp: normalizedOtp })
       if (!data.verified) {
         setError('OTP is invalid or expired. Please try again.')
         setState((p) => ({ ...p, verified: false, verifiedAadhaar: '' }))
         return false
       }
-      setState((p) => ({ ...p, verified: true, verifiedAadhaar: aadhaarNumber }))
+      setState((p) => ({ ...p, verified: true, verifiedAadhaar: normalizedAadhaar }))
       return true
     } catch (err) {
       setError(extractApiError(err, 'Unable to verify OTP.'))

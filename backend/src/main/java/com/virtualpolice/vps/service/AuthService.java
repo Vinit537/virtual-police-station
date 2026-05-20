@@ -7,6 +7,7 @@ import com.virtualpolice.vps.model.UserAccount;
 import com.virtualpolice.vps.repository.PoliceOfficerRepository;
 import com.virtualpolice.vps.repository.UserRepository;
 import com.virtualpolice.vps.security.JwtService;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -60,14 +61,47 @@ public class AuthService {
         }
 
         String token = jwtService.generateToken(saved.getId(), saved.getEmail(), saved.getRole());
-        return new AuthDtos.AuthResponse(token, saved.getRole(), saved.getFullName());
+        return buildAuthResponse(token, saved);
     }
 
     public AuthDtos.AuthResponse login(AuthDtos.LoginRequest request) {
-        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.email(), request.password()));
         UserAccount user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new IllegalArgumentException("Invalid credentials"));
+        try {
+            authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.email(), request.password()));
+        } catch (BadCredentialsException ex) {
+            // Backward compatibility for legacy records that stored raw passwords.
+            if (request.password().equals(user.getPasswordHash())) {
+                user.setPasswordHash(passwordEncoder.encode(request.password()));
+                userRepository.save(user);
+            } else {
+                throw ex;
+            }
+        }
         String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole());
-        return new AuthDtos.AuthResponse(token, user.getRole(), user.getFullName());
+        return buildAuthResponse(token, user);
+    }
+
+    public AuthDtos.ProfileResponse profile(String email) {
+        UserAccount user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
+        return new AuthDtos.ProfileResponse(
+                user.getFullName(),
+                user.getEmail(),
+                user.getRole(),
+                user.getAadhaarNumber(),
+                user.getCreatedAt()
+        );
+    }
+
+    private AuthDtos.AuthResponse buildAuthResponse(String token, UserAccount user) {
+        return new AuthDtos.AuthResponse(
+                token,
+                user.getRole(),
+                user.getFullName(),
+                user.getEmail(),
+                user.getAadhaarNumber(),
+                user.getCreatedAt()
+        );
     }
 }

@@ -47,7 +47,7 @@ export function LoginPage() {
       </div>
 
       <div className="card p-6">
-        <Alert type="error">{serverError}</Alert>
+        {serverError && <Alert type="error">{serverError}</Alert>}
 
         <form className={`space-y-4 ${serverError ? 'mt-4' : ''}`} onSubmit={handleSubmit(onSubmit)} noValidate>
           <Field label={t('login_email')} error={errors.email?.message}>

@@ -1,4 +1,4 @@
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { z } from 'zod'
@@ -10,7 +10,10 @@ import { Field, Alert } from '../ui/Shared'
 
 const step1Schema = z.object({
   fullName: z.string().min(3, 'Full name must be at least 3 characters'),
-  email: z.email('Valid email required'),
+  email: z
+    .string()
+    .email('Valid email required')
+    .regex(/^[a-zA-Z0-9._%+-]+@gmail\.com$/i, 'Only valid Gmail addresses are allowed'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
 })
 
@@ -23,6 +26,11 @@ const step3Schema = z.object({
 })
 
 const fullSchema = step1Schema.merge(step2Schema).merge(step3Schema)
+
+function formatAadhaarInput(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 12)
+  return digits.replace(/(\d{4})(?=\d)/g, '$1 ').trim()
+}
 
 function StepIndicator({ current, labels }) {
   return (
@@ -137,6 +145,7 @@ export function RegisterPage() {
 
   const {
     register,
+    control,
     handleSubmit,
     watch,
     trigger,
@@ -197,7 +206,7 @@ export function RegisterPage() {
       <div className="card p-6">
         <StepIndicator current={step} labels={steps} />
 
-        <Alert type="error">{serverError}</Alert>
+        {serverError && <Alert type="error">{serverError}</Alert>}
 
         <form
           onSubmit={(e) => e.preventDefault()}
@@ -221,13 +230,22 @@ export function RegisterPage() {
           {step === 1 && (
             <div className="animate-fade-in space-y-4">
               <Field label={t('reg_aadhaar')} error={errors.aadhaarNumber?.message}>
-                <input
-                  id="reg-aadhaar"
-                  data-testid="reg-aadhaar"
-                  className="input"
-                  placeholder="XXXX XXXX XXXX"
-                  maxLength={12}
-                  {...register('aadhaarNumber')}
+                <Controller
+                  name="aadhaarNumber"
+                  control={control}
+                  render={({ field }) => (
+                    <input
+                      id="reg-aadhaar"
+                      data-testid="reg-aadhaar"
+                      className="input"
+                      placeholder="XXXX XXXX XXXX"
+                      maxLength={14}
+                      value={formatAadhaarInput(field.value)}
+                      onBlur={field.onBlur}
+                      onChange={(e) => field.onChange(e.target.value.replace(/\D/g, '').slice(0, 12))}
+                      ref={field.ref}
+                    />
+                  )}
                 />
               </Field>
               <OtpPanel aadhaarNumber={aadhaarNumber} otp={otp} />

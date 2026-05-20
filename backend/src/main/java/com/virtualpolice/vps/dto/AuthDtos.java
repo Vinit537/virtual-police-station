@@ -26,7 +26,10 @@ public class AuthDtos {
     public record LoginRequest(@Email String email, @NotBlank String password) {
     }
 
-    public record AuthResponse(String token, Role role, String name) {
+    public record AuthResponse(String token, Role role, String name, String email, String aadhaarNumber, LocalDateTime createdAt) {
+    }
+
+    public record ProfileResponse(String name, String email, Role role, String aadhaarNumber, LocalDateTime createdAt) {
     }
 
     public record OtpGenerateRequest(@Pattern(regexp = "\\d{12}") String aadhaarNumber) {

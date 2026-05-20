@@ -34,9 +34,10 @@ function formatDate(value) {
   return new Date(value).toLocaleString()
 }
 
-function toIsoOrNull(value) {
+function toLocalDateTimeOrNull(value) {
   if (!value) return null
-  return new Date(value).toISOString()
+  // Backend expects LocalDateTime (no timezone), so keep local wall-clock format.
+  return value.length === 16 ? `${value}:00` : value
 }
 
 function nextAdminAction(detail) {
@@ -413,7 +414,7 @@ function Workbench({ detail, officers, onActionSuccess }) {
                   disabled={busy || !escalate.note.trim() || !commandApiAvailable}
                   onClick={() => runAction(() => http.post(`/admin/command/fir/${fir.id}/escalate`, {
                     note: escalate.note.trim(),
-                    dueAt: toIsoOrNull(escalate.dueAt),
+                    dueAt: toLocalDateTimeOrNull(escalate.dueAt),
                   }))}
                 >
                   {busy ? 'Saving...' : 'Escalate'}
@@ -431,7 +432,7 @@ function Workbench({ detail, officers, onActionSuccess }) {
                   disabled={busy || !requestUpdate.message.trim() || !commandApiAvailable}
                   onClick={() => runAction(() => http.post(`/admin/command/fir/${fir.id}/request-update`, {
                     message: requestUpdate.message.trim(),
-                    dueAt: toIsoOrNull(requestUpdate.dueAt),
+                    dueAt: toLocalDateTimeOrNull(requestUpdate.dueAt),
                   }))}
                 >
                   {busy ? 'Saving...' : 'Request Update'}
@@ -495,6 +496,27 @@ export function AdminDashboard() {
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 1024 : false))
   const [globalQueueStats, setGlobalQueueStats] = useState({ total: 0, critical: 0, breached: 0 })
 
+  const applyFallbackFilters = (items) => {
+    return items.filter((item) => {
+      const matchesPreset = (() => {
+        if (preset === 'ALL_CASES') return true
+        if (preset === 'SLA_BREACHES') return Boolean(item.isSlaBreached)
+        if (preset === 'AWAITING_CITIZEN_ACK_WATCH') return item.status === 'AWAITING_CITIZEN_ACK'
+        if (preset === 'CLOSED_AUDIT_ARCHIVE') return isClosedStatus(item.status)
+        return true
+      })()
+      if (!matchesPreset) return false
+      if (advanced.status && item.status !== advanced.status) return false
+      if (advanced.slaBucket && item.slaBucket !== advanced.slaBucket) return false
+      if (advanced.escalated !== '') {
+        const isEscalated = Boolean(item.escalatedAt)
+        if (advanced.escalated === 'true' && !isEscalated) return false
+        if (advanced.escalated === 'false' && isEscalated) return false
+      }
+      return true
+    })
+  }
+
   const loadAnalytics = async () => {
     setAnalyticsLoading(true)
     try {
@@ -521,9 +543,18 @@ export function AdminDashboard() {
     setQueueLoading(true)
     setQueueError('')
     try {
+      const presetParam = (() => {
+        if (preset === 'AWAITING_CITIZEN_ACK_WATCH') return undefined
+        return preset === 'ALL_CASES' ? undefined : preset
+      })()
+      const statusParam = (() => {
+        if (advanced.status) return advanced.status
+        if (preset === 'AWAITING_CITIZEN_ACK_WATCH') return 'AWAITING_CITIZEN_ACK'
+        return undefined
+      })()
       const params = {
-        preset: preset === 'ALL_CASES' ? undefined : preset,
-        status: advanced.status || undefined,
+        preset: presetParam,
+        status: statusParam,
         slaBucket: advanced.slaBucket || undefined,
         escalated: advanced.escalated === '' ? undefined : advanced.escalated === 'true',
       }
@@ -559,7 +590,7 @@ export function AdminDashboard() {
           lastAdminActionAt: null,
           adminNotePreview: '',
         }))
-        setQueue(mapped)
+        setQueue(applyFallbackFilters(mapped))
         setQueueError('Command API fallback applied in compatibility mode.')
         setLastRefreshAt(new Date())
       } catch (fallbackErr) {
@@ -657,16 +688,6 @@ export function AdminDashboard() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      loadQueue()
-      if (selectedCaseId) {
-        loadDetail(selectedCaseId)
-      }
-    }, 30_000)
-    return () => clearInterval(timer)
-  }, [selectedCaseId, preset, advanced.status, advanced.slaBucket, advanced.escalated])
 
   const queueStats = useMemo(() => buildQueueStats(queue), [queue])
 

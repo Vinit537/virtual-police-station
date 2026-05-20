@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useTranslation, LANGUAGES } from '../i18n/LanguageContext'
 import { DesignSystemProvider } from './DesignSystem'
@@ -50,6 +51,34 @@ export function Layout({ children }) {
 function Navbar({ user, logout, location }) {
   const isActive = (path) => location.pathname === path
   const { lang, setLang, t } = useTranslation()
+  const { refreshProfile } = useAuth()
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [profileError, setProfileError] = useState('')
+  const profileRef = useRef(null)
+
+  useEffect(() => {
+    if (!profileOpen) return undefined
+    const closeOnOutsideClick = (event) => {
+      if (profileRef.current && !profileRef.current.contains(event.target)) {
+        setProfileOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick)
+  }, [profileOpen])
+
+  const openProfile = async () => {
+    setProfileOpen((value) => !value)
+    setProfileError('')
+    try {
+      await refreshProfile()
+    } catch {
+      setProfileError('Unable to refresh profile details.')
+    }
+  }
+
+  const formatDate = (value) => (value ? new Date(value).toLocaleString() : '-')
+
   return (
     <header className="sticky top-0 z-50 border-b border-blue-900/40 shadow-float" style={{ background: 'linear-gradient(135deg, #0D1947 0%, #1F3A93 50%, #2D52C4 100%)' }}>
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -64,12 +93,52 @@ function Navbar({ user, logout, location }) {
           {LANGUAGES.map((language) => <option key={language.code} value={language.code} className="text-slate-900">{language.native}</option>)}
         </select>
         {user ? (
-          <div className="flex items-center gap-3">
+          <div className="relative flex items-center gap-3" ref={profileRef}>
             <div className="hidden flex-col items-end sm:flex">
               <span className="text-sm font-semibold text-white">{user.name}</span>
               <span className="text-xs font-medium text-policeGold-300">{ROLE_BADGE[user.role]?.labelKey ? t(ROLE_BADGE[user.role].labelKey) : user.role}</span>
             </div>
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-policeGold text-sm font-bold text-policeBlue-900 shadow-gold-glow">{user.name?.[0]?.toUpperCase() ?? 'U'}</div>
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-policeGold text-sm font-bold text-policeBlue-900 shadow-gold-glow transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-white"
+              aria-label="Open profile"
+              aria-expanded={profileOpen}
+              onClick={openProfile}
+            >
+              {user.name?.[0]?.toUpperCase() ?? 'U'}
+            </button>
+            {profileOpen && (
+              <div className="absolute right-0 top-12 z-50 w-80 rounded-xl border border-policeBlue-100 bg-white p-4 text-slate-700 shadow-panel">
+                <div className="mb-3 flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-policeBlue text-base font-bold text-white">
+                    {user.name?.[0]?.toUpperCase() ?? 'U'}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate font-heading text-base font-semibold text-policeBlue">{user.name || '-'}</p>
+                    <p className="text-xs font-medium text-slate-500">{ROLE_BADGE[user.role]?.labelKey ? t(ROLE_BADGE[user.role].labelKey) : user.role}</p>
+                  </div>
+                </div>
+                {profileError && <p className="mb-2 rounded-md bg-red-50 px-2 py-1 text-xs text-red-600">{profileError}</p>}
+                <dl className="space-y-2 text-sm">
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Full Name</dt>
+                    <dd className="break-words text-policeBlue">{user.name || '-'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Email</dt>
+                    <dd className="break-words text-policeBlue">{user.email || '-'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Aadhaar Number</dt>
+                    <dd className="font-mono text-policeBlue">{user.aadhaarNumber || '-'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Registered At</dt>
+                    <dd className="text-policeBlue">{formatDate(user.createdAt)}</dd>
+                  </div>
+                </dl>
+              </div>
+            )}
             <button onClick={logout} className="btn btn-sm border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/20" aria-label="Logout">
               <Icon name="logout" size={16} />
               <span className="hidden sm:inline">{t('nav_logout')}</span>

@@ -55,7 +55,7 @@ describe('RegisterPage', () => {
     )
 
     fireEvent.change(screen.getByPlaceholderText('Rajesh Kumar'), { target: { value: 'Already User' } })
-    fireEvent.change(screen.getByPlaceholderText('rajesh@example.com'), { target: { value: 'already@test.com' } })
+    fireEvent.change(screen.getByPlaceholderText('rajesh@example.com'), { target: { value: 'alreadyuser@gmail.com' } })
     fireEvent.change(document.getElementById('reg-password'), { target: { value: 'Password@123' } })
 
     fireEvent.click(screen.getByRole('button', { name: /next/i }))
@@ -95,7 +95,7 @@ describe('RegisterPage', () => {
     )
 
     fireEvent.change(screen.getByPlaceholderText('Rajesh Kumar'), { target: { value: 'Test User' } })
-    fireEvent.change(screen.getByPlaceholderText('rajesh@example.com'), { target: { value: 'test@example.com' } })
+    fireEvent.change(screen.getByPlaceholderText('rajesh@example.com'), { target: { value: 'testuser@gmail.com' } })
     fireEvent.change(document.getElementById('reg-password'), { target: { value: 'Password@123' } })
     fireEvent.click(screen.getByRole('button', { name: /next/i }))
     await waitFor(() => expect(screen.getByPlaceholderText('XXXX XXXX XXXX')).toBeInTheDocument())

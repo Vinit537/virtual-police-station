@@ -58,34 +58,19 @@ function buildRankScore(fir) {
 
 function enrichCase(fir) {
   const slaLabel = buildSlaLabel(fir)
-  const isActionRequired = fir.status === 'DISPUTED_REVIEW' || fir.status === 'AWAITING_CITIZEN_ACK'
+  const isActionRequired = fir.status === 'DISPUTED_REVIEW'
+    || fir.status === 'AWAITING_CITIZEN_ACK'
+    || fir.status === 'INVESTIGATING'
   const rankScore = buildRankScore(fir)
   return { ...fir, slaLabel, isActionRequired, rankScore }
 }
 
-function caseMatchesSearch(fir, text) {
-  if (!text.trim()) return true
-  const q = text.trim().toLowerCase()
-  const normalizedQ = q.replace(/^fir[\s#:-]*/i, '').replace(/^#/, '')
-  const safe = (value) => String(value || '')
-  const idText = safe(fir.id)
-  const blob = [
-    idText,
-    `#${idText}`,
-    `fir ${idText}`,
-    safe(fir.title),
-    safe(fir.description),
-    safe(fir.citizenName),
-    safe(fir.assignedStation),
-    safe(fir.assignedOfficerName),
-    safe(fir.status),
-    safe(fir.priority),
-  ].join(' ').toLowerCase()
-  return blob.includes(q) || blob.includes(normalizedQ)
-}
-
 function filterByPreset(fir, preset, userName) {
-  if (preset === PRESETS.ACTION_REQUIRED) return fir.status === 'DISPUTED_REVIEW' || fir.status === 'AWAITING_CITIZEN_ACK'
+  if (preset === PRESETS.ACTION_REQUIRED) {
+    return fir.status === 'DISPUTED_REVIEW'
+      || fir.status === 'AWAITING_CITIZEN_ACK'
+      || fir.status === 'INVESTIGATING'
+  }
   if (preset === PRESETS.ALL_OPEN) return !CLOSED_STATES.has(fir.status)
   if (preset === PRESETS.MY_ASSIGNED) {
     const normalize = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
@@ -390,11 +375,10 @@ export function PoliceDashboard() {
   const [error, setError] = useState('')
   const [activePreset, setActivePreset] = useState(PRESETS.ACTION_REQUIRED)
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false)
-  const [search, setSearch] = useState('')
   const [advanced, setAdvanced] = useState({
-    station: '',
-    assignee: '',
+    status: '',
     slaBucket: '',
+    escalated: '',
   })
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 1024 : false))
@@ -405,7 +389,15 @@ export function PoliceDashboard() {
 
   const openCaseDeskWithPreset = (preset) => {
     setActivePreset(preset)
+    setAdvanced({ status: '', slaBucket: '', escalated: '' })
+    setAdvancedFiltersOpen(false)
     navigate('/police?tab=case-desk')
+  }
+
+  const applyPreset = (preset) => {
+    setActivePreset(preset)
+    setAdvanced({ status: '', slaBucket: '', escalated: '' })
+    setAdvancedFiltersOpen(false)
   }
 
   const loadQueue = async () => {
@@ -452,9 +444,7 @@ export function PoliceDashboard() {
     const now = Date.now()
     const items = queue.filter((fir) => {
       if (!filterByPreset(fir, activePreset, user?.name)) return false
-      if (!caseMatchesSearch(fir, search)) return false
-      if (advanced.station && !(fir.assignedStation || '').toLowerCase().includes(advanced.station.trim().toLowerCase())) return false
-      if (advanced.assignee && !(fir.assignedOfficerName || '').toLowerCase().includes(advanced.assignee.trim().toLowerCase())) return false
+      if (advanced.status && fir.status !== advanced.status) return false
       if (advanced.slaBucket) {
         const dueMs = fir.acknowledgementDueAt ? new Date(fir.acknowledgementDueAt).getTime() : null
         const diffHours = dueMs == null ? null : Math.floor((dueMs - now) / (1000 * 60 * 60))
@@ -462,10 +452,15 @@ export function PoliceDashboard() {
         if (advanced.slaBucket === 'DUE_24H' && !(fir.status === 'AWAITING_CITIZEN_ACK' && diffHours != null && diffHours >= 0 && diffHours <= 24)) return false
         if (advanced.slaBucket === 'DUE_3D' && !(fir.status === 'AWAITING_CITIZEN_ACK' && diffHours != null && diffHours > 24 && diffHours <= 72)) return false
       }
+      if (advanced.escalated !== '') {
+        const isEscalated = Boolean(fir.escalatedAt)
+        if (advanced.escalated === 'true' && !isEscalated) return false
+        if (advanced.escalated === 'false' && isEscalated) return false
+      }
       return true
     })
     return items.slice().sort((a, b) => a.rankScore - b.rankScore)
-  }, [queue, activePreset, user?.name, search, advanced])
+  }, [queue, activePreset, user?.name, advanced])
 
   useEffect(() => {
     if (!filteredCases.length) {
@@ -542,18 +537,17 @@ export function PoliceDashboard() {
       {activePageTab === 'case-desk' && <Panel title="Police Operations">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={`btn btn-xs ${activePreset === PRESETS.ACTION_REQUIRED ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActivePreset(PRESETS.ACTION_REQUIRED)}>Action Required</button>
-            <button type="button" className={`btn btn-xs ${activePreset === PRESETS.ALL_OPEN ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActivePreset(PRESETS.ALL_OPEN)}>All Open</button>
-            <button type="button" className={`btn btn-xs ${activePreset === PRESETS.MY_ASSIGNED ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActivePreset(PRESETS.MY_ASSIGNED)}>My Assigned</button>
-            <button type="button" className={`btn btn-xs ${activePreset === PRESETS.CLOSED_ARCHIVE ? 'btn-primary' : 'btn-outline'}`} onClick={() => setActivePreset(PRESETS.CLOSED_ARCHIVE)}>Closed Archive</button>
+            <button type="button" className={`btn btn-xs ${activePreset === PRESETS.ACTION_REQUIRED ? 'btn-primary' : 'btn-outline'}`} onClick={() => applyPreset(PRESETS.ACTION_REQUIRED)}>Action Required</button>
+            <button type="button" className={`btn btn-xs ${activePreset === PRESETS.ALL_OPEN ? 'btn-primary' : 'btn-outline'}`} onClick={() => applyPreset(PRESETS.ALL_OPEN)}>All Open</button>
+            <button type="button" className={`btn btn-xs ${activePreset === PRESETS.MY_ASSIGNED ? 'btn-primary' : 'btn-outline'}`} onClick={() => applyPreset(PRESETS.MY_ASSIGNED)}>My Assigned</button>
+            <button type="button" className={`btn btn-xs ${activePreset === PRESETS.CLOSED_ARCHIVE ? 'btn-primary' : 'btn-outline'}`} onClick={() => applyPreset(PRESETS.CLOSED_ARCHIVE)}>Closed Archive</button>
           </div>
           <div className="flex gap-2">
-            <button type="button" className="btn btn-xs btn-primary">Inbox</button>
+            <button type="button" className="btn btn-xs btn-primary" onClick={refreshAll}>Refresh</button>
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
-          <input className="input" placeholder="Search FIR #, title, citizen, station..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="mt-3 grid gap-2 md:grid-cols-[auto]">
           <button type="button" className="btn btn-outline" onClick={() => setAdvancedFiltersOpen((v) => !v)}>
             {advancedFiltersOpen ? 'Hide Advanced Filters' : 'Advanced Filters'}
           </button>
@@ -561,13 +555,26 @@ export function PoliceDashboard() {
 
         {advancedFiltersOpen && (
           <div className="mt-3 grid gap-2 md:grid-cols-3">
-            <input className="input" placeholder="Station" value={advanced.station} onChange={(e) => setAdvanced((p) => ({ ...p, station: e.target.value }))} />
-            <input className="input" placeholder="Assignee" value={advanced.assignee} onChange={(e) => setAdvanced((p) => ({ ...p, assignee: e.target.value }))} />
+            <select className="input" value={advanced.status} onChange={(e) => setAdvanced((p) => ({ ...p, status: e.target.value }))}>
+              <option value="">All Status</option>
+              <option value="SUBMITTED">SUBMITTED</option>
+              <option value="UNDER_REVIEW">UNDER_REVIEW</option>
+              <option value="INVESTIGATING">INVESTIGATING</option>
+              <option value="AWAITING_CITIZEN_ACK">AWAITING_CITIZEN_ACK</option>
+              <option value="DISPUTED_REVIEW">DISPUTED_REVIEW</option>
+              <option value="CLOSED_CONFIRMED">CLOSED_CONFIRMED</option>
+              <option value="CLOSED_AUTO_ACK">CLOSED_AUTO_ACK</option>
+            </select>
             <select className="input" value={advanced.slaBucket} onChange={(e) => setAdvanced((p) => ({ ...p, slaBucket: e.target.value }))}>
               <option value="">All SLA</option>
               <option value="OVERDUE">Overdue</option>
               <option value="DUE_24H">Due in 24h</option>
               <option value="DUE_3D">Due in 3 days</option>
+            </select>
+            <select className="input" value={advanced.escalated} onChange={(e) => setAdvanced((p) => ({ ...p, escalated: e.target.value }))}>
+              <option value="">Escalated: All</option>
+              <option value="true">Escalated Only</option>
+              <option value="false">Not Escalated</option>
             </select>
           </div>
         )}

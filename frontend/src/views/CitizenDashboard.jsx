@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { http } from '../api/http'
 import { extractApiError, useFirs } from '../api/hooks'
+import { useAuth } from '../context/AuthContext'
 import { Panel, StatCard, LoadingSpinner, EmptyState } from '../ui/Cards'
 import { Alert, PriorityBadge, StatusBadge, StatusTimeline } from '../ui/Shared'
 import { PageTemplate } from '../ui/DesignSystem'
@@ -38,14 +39,20 @@ function useVoiceInput() {
       return
     }
     try {
-      // Explicitly request mic access so users reliably get a permission prompt.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      stream.getTracks().forEach((track) => track.stop())
-      setPermissionGranted(true)
+      // Try explicit mic permission first, but do not block recognition start if this check fails.
+      const canRequestMic = typeof navigator !== 'undefined'
+        && navigator.mediaDevices
+        && typeof navigator.mediaDevices.getUserMedia === 'function'
+      if (canRequestMic) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        stream.getTracks().forEach((track) => track.stop())
+        setPermissionGranted(true)
+      } else {
+        setPermissionGranted(false)
+      }
     } catch {
+      // Some Chrome setups can still start Web Speech after this fails; let recognition decide.
       setPermissionGranted(false)
-      setError('Microphone permission denied. Allow microphone access and try again.')
-      return
     }
 
     const RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -163,7 +170,8 @@ function CitizenHome({ firs, onFileAction, onEvidenceAction, onPendingAckAction 
   )
 }
 
-function FirWizard({ onSubmitted, resumeSignal }) {
+function FirWizard({ onSubmitted, resumeSignal, registeredAadhaar }) {
+  const totalSteps = 4
   const { register, setValue, getValues, watch, reset, formState: { errors } } = useForm({
     defaultValues: {
       title: '',
@@ -194,12 +202,12 @@ function FirWizard({ onSubmitted, resumeSignal }) {
     title: sourceValues.title || null,
     description: sourceValues.description || null,
     location: sourceValues.location || null,
-    aadhaarNumber: String(sourceValues.aadhaarNumber || '').trim() || null,
+    aadhaarNumber: String(registeredAadhaar || sourceValues.aadhaarNumber || '').trim() || null,
     ocrExtractedText: sourceValues.ocrExtractedText || null,
     ocrKeywords: sourceValues.ocrKeywords || null,
     suggestedCategory: sourceValues.suggestedCategory || null,
     suggestedPriority: sourceValues.suggestedPriority || null,
-  }), [])
+  }), [registeredAadhaar])
 
   const loadLatestDraft = useCallback(async () => {
     try {
@@ -269,8 +277,9 @@ function FirWizard({ onSubmitted, resumeSignal }) {
       setMessage({ type: 'error', text: 'Location is required for routing to station.' })
       return false
     }
-    if (step === 4 && !/^\d{12}$/.test(current.aadhaarNumber || '')) {
-      setMessage({ type: 'error', text: 'Enter valid 12-digit Aadhaar in step 4.' })
+    const linkedAadhaar = String(registeredAadhaar || current.aadhaarNumber || '').trim()
+    if (step === totalSteps && !/^\d{12}$/.test(linkedAadhaar)) {
+      setMessage({ type: 'error', text: 'Registered Aadhaar not available. Please logout and login again.' })
       return false
     }
     return true
@@ -279,7 +288,7 @@ function FirWizard({ onSubmitted, resumeSignal }) {
   const next = () => {
     if (!validateStep()) return
     setMessage(null)
-    setStep((prev) => Math.min(5, prev + 1))
+    setStep((prev) => Math.min(totalSteps, prev + 1))
   }
 
   const back = () => setStep((prev) => Math.max(1, prev - 1))
@@ -355,7 +364,7 @@ function FirWizard({ onSubmitted, resumeSignal }) {
         locationState: '',
         locationCity: '',
         locationArea: '',
-        aadhaarNumber: payload.aadhaarNumber || '',
+        aadhaarNumber: registeredAadhaar || payload.aadhaarNumber || '',
         ocrExtractedText: '',
         ocrKeywords: '',
         suggestedCategory: '',
@@ -370,7 +379,7 @@ function FirWizard({ onSubmitted, resumeSignal }) {
     }
   }
 
-  const progressPct = useMemo(() => Math.round((step / 5) * 100), [step])
+  const progressPct = useMemo(() => Math.round((step / totalSteps) * 100), [step, totalSteps])
 
   return (
     <Panel title="File FIR - Guided Wizard">
@@ -378,7 +387,7 @@ function FirWizard({ onSubmitted, resumeSignal }) {
 
       <div className="mb-4 rounded-xl border border-policeBlue-100 bg-policeBlue-50 p-3">
         <div className="flex items-center justify-between text-xs font-semibold text-policeBlue">
-          <span>Step {step} of 5</span>
+          <span>Step {step} of {totalSteps}</span>
           <span>{progressPct}% completed</span>
         </div>
         <div className="mt-2 h-2 rounded-full bg-white">
@@ -440,15 +449,7 @@ function FirWizard({ onSubmitted, resumeSignal }) {
 
       {step === 4 && (
         <div className="space-y-3">
-          <p className="text-sm font-semibold text-policeBlue">4. Aadhaar Confirmation</p>
-          <input data-testid="wizard-aadhaar" className="input" maxLength={12} placeholder="12-digit Aadhaar" {...register('aadhaarNumber', { required: true })} />
-          <p className="text-xs text-slate-500">Your FIR can be submitted only when Aadhaar matches logged-in account.</p>
-        </div>
-      )}
-
-      {step === 5 && (
-        <div className="space-y-3">
-          <p className="text-sm font-semibold text-policeBlue">5. Review and Submit</p>
+          <p className="text-sm font-semibold text-policeBlue">4. Review and Submit</p>
           <div className="rounded-xl border border-policeBlue-100 bg-white p-3 text-sm">
             <p><span className="font-semibold">Title:</span> {getValues('title')}</p>
             <p><span className="font-semibold">Location:</span> {getValues('location')}</p>
@@ -465,8 +466,8 @@ function FirWizard({ onSubmitted, resumeSignal }) {
 
       <div className="mt-4 flex flex-wrap gap-2">
         <button type="button" data-testid="wizard-back" className="btn btn-outline" disabled={step === 1} onClick={back}>Back</button>
-        {step < 5 && <button type="button" data-testid="wizard-next" className="btn btn-primary" onClick={next}>Next</button>}
-        {step === 5 && <button type="button" data-testid="wizard-submit" className="btn btn-gold" disabled={busy} onClick={submitFir}>{busy ? 'Submitting...' : 'Submit FIR'}</button>}
+        {step < totalSteps && <button type="button" data-testid="wizard-next" className="btn btn-primary" onClick={next}>Next</button>}
+        {step === totalSteps && <button type="button" data-testid="wizard-submit" className="btn btn-gold" disabled={busy} onClick={submitFir}>{busy ? 'Submitting...' : 'Submit FIR'}</button>}
       </div>
 
       {receipt && (
@@ -837,6 +838,8 @@ function CitizenCaseDetail({ id }) {
 }
 
 function CitizenMain() {
+  const auth = useAuth()
+  const user = auth?.user || null
   const { firs, loading, error, reload } = useFirs()
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('home')
@@ -910,6 +913,7 @@ function CitizenMain() {
         <FirWizard
           onSubmitted={reload}
           resumeSignal={resumeSignal}
+          registeredAadhaar={user?.aadhaarNumber || ''}
         />
       )}
 

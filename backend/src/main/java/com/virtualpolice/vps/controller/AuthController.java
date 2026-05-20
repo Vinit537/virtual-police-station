@@ -4,6 +4,7 @@ import com.virtualpolice.vps.dto.AuthDtos;
 import com.virtualpolice.vps.service.AuthService;
 import com.virtualpolice.vps.service.OtpService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -25,6 +26,11 @@ public class AuthController {
     @PostMapping("/login")
     public AuthDtos.AuthResponse login(@Valid @RequestBody AuthDtos.LoginRequest request) {
         return authService.login(request);
+    }
+
+    @GetMapping("/me")
+    public AuthDtos.ProfileResponse profile(Authentication auth) {
+        return authService.profile(auth.getName());
     }
 
     @PostMapping("/otp/generate")
